@@ -497,5 +497,5 @@ def api_download():
 
 
 if __name__ == '__main__':
-    print('\n  ⚡ OS PractiGen running at http://localhost:5001\n')
+    print('\n  [+] OS PractiGen running at http://localhost:5001\n')
     app.run(host='0.0.0.0', port=5001, debug=True)

@@ -33,22 +33,38 @@ const importInput = $('#aims-import-input');
 const apiKeyInput = $('#api-key');
 const terminalUserInput = $('#terminal-user');
 const terminalHostInput = $('#terminal-host');
+const codeLanguageInput = $('#code-language');
 const aimsTextarea = $('#aims-textarea');
-const modelInputs = () => Array.from($$('input[name="model"]')).find(i => i.checked).value;
+const selectedModelInput = () => Array.from($$('input[name="model"]')).find(i => i.checked);
+const modelInputs = () => selectedModelInput().value;
+const providerInputs = () => selectedModelInput().dataset.provider || 'groq';
 const genModeInputs = () => Array.from($$('input[name="gen-mode"]')).find(i => i.checked).value;
+const getCodeLanguage = () => codeLanguageInput.value.trim();
 
-// Toggle OS Credentials depending on mode
+function updateModeFields() {
+    const mode = genModeInputs();
+    const osGroup = $('#os-credentials-group');
+    const languageGroup = $('#general-language-group');
+
+    if (mode === 'os') {
+        osGroup.classList.remove('hidden', 'opacity-0');
+        osGroup.classList.add('grid', 'opacity-100');
+    } else {
+        osGroup.classList.remove('grid', 'opacity-100');
+        osGroup.classList.add('hidden', 'opacity-0');
+    }
+
+    if (mode === 'general') {
+        languageGroup.classList.remove('hidden', 'opacity-0');
+        languageGroup.classList.add('block', 'opacity-100');
+    } else {
+        languageGroup.classList.remove('block', 'opacity-100');
+        languageGroup.classList.add('hidden', 'opacity-0');
+    }
+}
+
 Array.from($$('input[name="gen-mode"]')).forEach(input => {
-    input.addEventListener('change', (e) => {
-        const osGroup = $('#os-credentials-group');
-        if (e.target.value === 'os') {
-            osGroup.classList.remove('hidden', 'opacity-0');
-            osGroup.classList.add('grid', 'opacity-100');
-        } else {
-            osGroup.classList.remove('grid', 'opacity-100');
-            osGroup.classList.add('hidden', 'opacity-0');
-        }
-    });
+    input.addEventListener('change', updateModeFields);
 });
 const getSettings = () => ({
     fontName: $('#setting-font').value,
@@ -83,6 +99,7 @@ let generatedExperiments = [];
 function init() {
     loadFromLocalStorage();
     setupEventListeners();
+    updateModeFields();
     showSection('dashboard');
 
     // UI Helper for Advanced Tray
@@ -185,6 +202,12 @@ function setupEventListeners() {
     });
 
     btnNextToP2.addEventListener('click', () => {
+        if (genModeInputs() === 'general' && !getCodeLanguage()) {
+            showToast('Enter a code language for General Coding mode.', 'warning');
+            codeLanguageInput.focus();
+            return;
+        }
+
         saveToLocalStorage();
         setPhase(2);
     });
@@ -195,6 +218,12 @@ function setupEventListeners() {
         const text = aimsTextarea.value.trim();
         if (!text) {
             showToast('Logic drafting area is empty.', 'warning');
+            return;
+        }
+        if (genModeInputs() === 'general' && !getCodeLanguage()) {
+            showToast('Enter a code language before generation.', 'warning');
+            setPhase(1);
+            codeLanguageInput.focus();
             return;
         }
 
@@ -322,10 +351,17 @@ async function startGeneration() {
     generatedExperiments = [];
     const apiKey = apiKeyInput.value.trim();
     const model = modelInputs();
+    const provider = providerInputs();
+    const mode = genModeInputs();
+    const codeLanguage = getCodeLanguage();
     const terminalUser = terminalUserInput.value.trim() || 'student';
     const terminalHost = terminalHostInput.value.trim() || 'kali';
 
-    terminalLog(`➜ Target Model: ${model.toUpperCase()}`);
+    terminalLog(`➜ Target Provider: ${provider.toUpperCase()} / ${model.toUpperCase()}`);
+
+    if (mode === 'general') {
+        terminalLog(`Language Lock: ${codeLanguage}`);
+    }
 
     for (let i = 0; i < parsedAims.length; i++) {
         const aim = parsedAims[i];
@@ -344,7 +380,7 @@ async function startGeneration() {
             const res = await fetch('/api/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ aim, api_key: apiKey, model, mode: genModeInputs(), terminal_user: terminalUser, terminal_host: terminalHost })
+                body: JSON.stringify({ aim, api_key: apiKey, provider, model, mode, code_language: codeLanguage, terminal_user: terminalUser, terminal_host: terminalHost })
             });
             const data = await res.json();
             if (data.error) throw new Error(data.error);
@@ -357,7 +393,7 @@ async function startGeneration() {
             indicator.innerHTML = '<span class="material-symbols-outlined text-[10px]">check_circle</span> COMPLETE';
             terminalLog(`✔ Seed ${i + 1} synthesized successfully.`);
         } catch (err) {
-            showToast(`Logic node ${i + 1} failed.`, 'error');
+            showToast(`Logic node ${i + 1} failed: ${err.message}`, 'error');
             card.classList.replace('border-l-primary', 'border-l-red-500');
             indicator.className = "status-indicator px-2 py-1 rounded-md bg-red-50 text-red-500 text-[9px] font-black uppercase tracking-widest flex items-center gap-1";
             indicator.innerHTML = '<span class="material-symbols-outlined text-[10px]">error</span> FAILED';
@@ -461,13 +497,16 @@ window.promptRefine = async (index) => {
     try {
         const apiKey = apiKeyInput.value.trim();
         const model = modelInputs();
+        const provider = providerInputs();
+        const mode = genModeInputs();
+        const codeLanguage = getCodeLanguage();
         const terminalUser = terminalUserInput.value.trim() || 'student';
         const terminalHost = terminalHostInput.value.trim() || 'kali';
 
         const res = await fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ aim: refinedAim, api_key: apiKey, model, terminal_user: terminalUser, terminal_host: terminalHost })
+            body: JSON.stringify({ aim: refinedAim, api_key: apiKey, provider, model, mode, code_language: codeLanguage, terminal_user: terminalUser, terminal_host: terminalHost })
         });
 
         const data = await res.json();
@@ -520,10 +559,12 @@ function showToast(message, type = 'info') {
 
 function saveToLocalStorage() {
     localStorage.setItem('practigen_api_key_v5', apiKeyInput.value);
+    localStorage.setItem('practigen_code_language_v5', getCodeLanguage());
 }
 
 function loadFromLocalStorage() {
     apiKeyInput.value = localStorage.getItem('practigen_api_key_v5') || '';
+    codeLanguageInput.value = localStorage.getItem('practigen_code_language_v5') || '';
 }
 
 // Start

@@ -4,7 +4,7 @@ PractiGen is an AI-powered tool designed to automate the creation of programming
 
 ## 🚀 Features
 
-- **AI-Powered Generation**: Uses Groq's high-speed LLaMA models to generate academic content.
+- **AI-Powered Generation**: Uses OpenAI-compatible free-tier LLM APIs to generate academic content.
 - **Support for Multiple Languages**: Automatically detects and generates code for C, Python, JavaScript, etc.
 - **Customizable Formatting**: Configure fonts (Times New Roman, Arial, etc.) and sizes for body text, headings, and code.
 - **Live Preview**: Parse experiment aims using `---` dividers and preview the generated content before downloading.
@@ -15,7 +15,7 @@ PractiGen is an AI-powered tool designed to automate the creation of programming
 
 - **Frontend**: Vanilla JavaScript (ES6+), CSS3 (Custom Properties, Glassmorphism), Semantic HTML5.
 - **Backend**: Python 3.9+ (Serverless Functions).
-- **API**: Groq Cloud API for LLM inference.
+- **API**: Provider-selectable LLM inference through Groq and Cerebras.
 - **Document Generation**: `python-docx` for structured Word document creation.
 - **Styling**: Modern dark-themed UI with responsive grid layouts and animations.
 
@@ -38,8 +38,12 @@ PractiGen is an AI-powered tool designed to automate the creation of programming
    vercel dev
    ```
 
-4. **API Key**: 
-   Obtain a Groq API Key from the [Groq Console](https://console.groq.com/) and enter it in the configuration panel.
+4. **API Key**:
+   Choose a model in the configuration panel and enter that provider's API key. If the key field is empty, PractiGen reads provider-specific environment variables:
+
+   - `GROQ_API_KEY`
+   - repeated `GROQ_API_KEY` entries are used as backup keys
+   - `CEREBRAS_API_KEY`
 
 ## 📂 Project Structure
 

@@ -1,4 +1,3 @@
-groq
 python-docx
 Pillow
 Flask

@@ -179,8 +179,8 @@
                                 <span class="material-symbols-outlined text-2xl">bolt</span>
                             </div>
                             <div>
-                                <h3 class="font-bold text-xl mb-2">Groq Powered</h3>
-                                <p class="text-sm text-slate-500 leading-relaxed font-medium">Blazing fast generation speeds using Llama 3.3 70B and 3.1 8B via Groq LPUs.</p>
+                                <h3 class="font-bold text-xl mb-2">Multi-LLM Ready</h3>
+                                <p class="text-sm text-slate-500 leading-relaxed font-medium">Switch between Groq and Cerebras for fast, focused practical generation.</p>
                             </div>
                         </div>
                     </div>
@@ -277,7 +277,7 @@
                                         <div>
                                             <label
                                                 class="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Neural
-                                                API Key (Dynamic Detection)</label>
+                                                API Key (Selected Provider)</label>
                                             <div class="relative">
                                                 <input id="api-key" type="password"
                                                     class="w-full bg-slate-50/50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/20 transition-all font-mono"
@@ -312,6 +312,17 @@
                                                 </div>
                                             </div>
                                         </div>
+                                        <div id="general-language-group" class="hidden opacity-0 transition-all duration-300">
+                                            <label
+                                                class="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Code Language</label>
+                                            <div class="relative">
+                                                <input id="code-language" type="text"
+                                                    class="w-full bg-slate-50/50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/20 transition-all font-mono"
+                                                    placeholder="e.g. C, Java, Python, JavaScript">
+                                                <span
+                                                    class="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-xl text-slate-400">code</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="glass-panel p-6 rounded-2xl border-slate-200/50 shadow-sm">
@@ -323,7 +334,7 @@
                                         <!-- Llama Models -->
                                         <div class="relative">
                                             <input type="radio" name="model" id="m-llama-1" class="peer hidden" checked
-                                                value="llama-3.3-70b-versatile">
+                                                value="llama-3.3-70b-versatile" data-provider="groq">
                                             <label for="m-llama-1"
                                                 class="block p-4 border-2 border-slate-100 rounded-xl cursor-pointer hover:bg-slate-50 transition-all peer-checked:border-primary peer-checked:bg-primary/5 h-full">
                                                 <div class="flex justify-between items-start mb-1">
@@ -336,7 +347,7 @@
                                         </div>
                                         <div class="relative">
                                             <input type="radio" name="model" id="m-llama-2" class="peer hidden"
-                                                value="llama-3.1-8b-instant">
+                                                value="llama-3.1-8b-instant" data-provider="groq">
                                             <label for="m-llama-2"
                                                 class="block p-4 border-2 border-slate-100 rounded-xl cursor-pointer hover:bg-slate-50 transition-all peer-checked:border-primary peer-checked:bg-primary/5 h-full">
                                                 <div class="flex justify-between items-start mb-1">
@@ -345,6 +356,19 @@
                                                         class="material-symbols-outlined text-primary scale-0 peer-checked:scale-100 transition-transform">check_circle</span>
                                                 </div>
                                                 <p class="text-[11px] text-slate-500">Instant generation.</p>
+                                            </label>
+                                        </div>
+                                        <div class="relative">
+                                            <input type="radio" name="model" id="m-cerebras-2" class="peer hidden"
+                                                value="qwen-3-235b-a22b-instruct-2507" data-provider="cerebras">
+                                            <label for="m-cerebras-2"
+                                                class="block p-4 border-2 border-slate-100 rounded-xl cursor-pointer hover:bg-slate-50 transition-all peer-checked:border-primary peer-checked:bg-primary/5 h-full">
+                                                <div class="flex justify-between items-start mb-1">
+                                                    <span class="text-sm font-bold">Cerebras Qwen 235B</span>
+                                                    <span
+                                                        class="material-symbols-outlined text-primary scale-0 peer-checked:scale-100 transition-transform">check_circle</span>
+                                                </div>
+                                                <p class="text-[11px] text-slate-500">Large open model.</p>
                                             </label>
                                         </div>
                                     </div>
