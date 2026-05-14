@@ -318,13 +318,33 @@ def add_code_para(doc, code_text, font_name='Times New Roman', size=10):
     run.font.size = Pt(size)
 
 
+def make_short_caption(text, fallback='Terminal Output', max_words=5, max_chars=45):
+    cleaned = re.sub(r'\s+', ' ', str(text or '')).strip()
+    cleaned = re.sub(r'^Step\s*\d+\s*[:.)-]\s*', '', cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.strip(' .:-')
+
+    if not cleaned:
+        cleaned = fallback
+
+    words = cleaned.split()
+    if len(words) > max_words:
+        cleaned = ' '.join(words[:max_words])
+
+    if len(cleaned) > max_chars:
+        clipped = cleaned[:max_chars].rsplit(' ', 1)[0]
+        cleaned = (clipped or cleaned[:max_chars]).strip(' .:-')
+
+    return cleaned or fallback
+
+
 def add_caption_para(doc, text, experiment_no, step_no=None, font_name='Times New Roman', size=10):
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    caption_text = make_short_caption(text)
     if step_no:
-        label = f'Figure {experiment_no}.{step_no} - {text}'
+        label = f'Figure {experiment_no}.{step_no} - {caption_text}'
     else:
-        label = f'Figure {experiment_no} - {text}'
+        label = f'Figure {experiment_no} - {caption_text}'
     run = p.add_run(label)
     run.font.name = font_name
     run.font.size = Pt(size)
