@@ -34,9 +34,10 @@ const apiKeyInput = $('#api-key');
 const terminalUserInput = $('#terminal-user');
 const terminalHostInput = $('#terminal-host');
 const codeLanguageInput = $('#code-language');
+const customModelInput = $('#custom-model-id');
 const aimsTextarea = $('#aims-textarea');
 const selectedModelInput = () => Array.from($$('input[name="model"]')).find(i => i.checked);
-const modelInputs = () => selectedModelInput().value;
+const modelInputs = () => customModelInput?.value.trim() || selectedModelInput().value;
 const providerInputs = () => selectedModelInput().dataset.provider || 'groq';
 const genModeInputs = () => Array.from($$('input[name="gen-mode"]')).find(i => i.checked).value;
 const getCodeLanguage = () => codeLanguageInput.value.trim();
@@ -76,6 +77,36 @@ const getSettings = () => ({
     terminalImgWidth: $('#setting-term-width').value,
     outputFilename: 'PractiGen_Artifact.docx'
 });
+
+function getDownloadExperiments() {
+    const mode = genModeInputs();
+
+    return generatedExperiments.map((exp) => {
+        const base = {
+            aim: exp.aim,
+            concept: exp.concept,
+            caption: exp.caption
+        };
+
+        if (mode === 'os') {
+            return {
+                ...base,
+                steps: (exp.steps || []).map((step) => ({
+                    num: step.num,
+                    explanation: step.explanation,
+                    command: step.command,
+                    output: step.output
+                }))
+            };
+        }
+
+        return {
+            ...base,
+            code: exp.code,
+            output: exp.output
+        };
+    });
+}
 
 // Progress
 const overallProgressBar = $('#overall-progress-bar');
@@ -289,14 +320,14 @@ function setupEventListeners() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    experiments: generatedExperiments,
+                    experiments: getDownloadExperiments(),
                     settings: settings,
                     mode: genModeInputs()
                 }),
             });
 
             if (!res.ok) {
-                const errData = await res.json();
+                const errData = await res.json().catch(() => ({}));
                 throw new Error(errData.error || 'Server rejected bundle request.');
             }
 
@@ -312,8 +343,11 @@ function setupEventListeners() {
             terminalLog("➜ Export successful. Project completed.");
         } catch (err) {
             console.error(err);
-            showToast(`Bundle export error: ${err.message}`, "error");
-            terminalLog(`➜ CRITICAL: ${err.message}`);
+            const message = err instanceof TypeError && err.message === 'Failed to fetch'
+                ? 'Download service is unreachable or the request was too large. Try fewer experiments or smaller terminal output.'
+                : err.message;
+            showToast(`Bundle export error: ${message}`, "error");
+            terminalLog(`➜ CRITICAL: ${message}`);
         } finally {
             btnDownload.disabled = false;
             btnDownload.innerHTML = '<span class="material-symbols-outlined text-[18px]">cloud_download</span> DOWNLOAD DOCUMENT';
@@ -560,11 +594,15 @@ function showToast(message, type = 'info') {
 function saveToLocalStorage() {
     localStorage.setItem('practigen_api_key_v5', apiKeyInput.value);
     localStorage.setItem('practigen_code_language_v5', getCodeLanguage());
+    localStorage.setItem('practigen_custom_model_v5', customModelInput?.value.trim() || '');
 }
 
 function loadFromLocalStorage() {
     apiKeyInput.value = localStorage.getItem('practigen_api_key_v5') || '';
     codeLanguageInput.value = localStorage.getItem('practigen_code_language_v5') || '';
+    if (customModelInput) {
+        customModelInput.value = localStorage.getItem('practigen_custom_model_v5') || '';
+    }
 }
 
 // Start

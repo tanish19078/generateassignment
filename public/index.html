@@ -180,7 +180,7 @@
                             </div>
                             <div>
                                 <h3 class="font-bold text-xl mb-2">Multi-LLM Ready</h3>
-                                <p class="text-sm text-slate-500 leading-relaxed font-medium">Switch between Groq and Cerebras for fast, focused practical generation.</p>
+                                <p class="text-sm text-slate-500 leading-relaxed font-medium">Switch between Groq, Cerebras, and FreeModel routes for fast, focused practical generation.</p>
                             </div>
                         </div>
                     </div>
@@ -371,6 +371,40 @@
                                                 <p class="text-[11px] text-slate-500">Large open model.</p>
                                             </label>
                                         </div>
+                                        <div class="relative">
+                                            <input type="radio" name="model" id="m-freemodel-openai" class="peer hidden"
+                                                value="gpt-4o-mini" data-provider="freemodel_openai">
+                                            <label for="m-freemodel-openai"
+                                                class="block p-4 border-2 border-slate-100 rounded-xl cursor-pointer hover:bg-slate-50 transition-all peer-checked:border-primary peer-checked:bg-primary/5 h-full">
+                                                <div class="flex justify-between items-start mb-1">
+                                                    <span class="text-sm font-bold">FreeModel OpenAI</span>
+                                                    <span
+                                                        class="material-symbols-outlined text-primary scale-0 peer-checked:scale-100 transition-transform">check_circle</span>
+                                                </div>
+                                                <p class="text-[11px] text-slate-500">OpenAI chat completions route.</p>
+                                            </label>
+                                        </div>
+                                        <div class="relative">
+                                            <input type="radio" name="model" id="m-freemodel-claude" class="peer hidden"
+                                                value="claude-3-5-sonnet-20241022" data-provider="freemodel_anthropic">
+                                            <label for="m-freemodel-claude"
+                                                class="block p-4 border-2 border-slate-100 rounded-xl cursor-pointer hover:bg-slate-50 transition-all peer-checked:border-primary peer-checked:bg-primary/5 h-full">
+                                                <div class="flex justify-between items-start mb-1">
+                                                    <span class="text-sm font-bold">FreeModel Claude</span>
+                                                    <span
+                                                        class="material-symbols-outlined text-primary scale-0 peer-checked:scale-100 transition-transform">check_circle</span>
+                                                </div>
+                                                <p class="text-[11px] text-slate-500">Anthropic messages route.</p>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="mt-4">
+                                        <label
+                                            class="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Custom
+                                            Model ID (Optional)</label>
+                                        <input id="custom-model-id" type="text"
+                                            placeholder="Leave blank to use the selected preset model"
+                                            class="w-full bg-slate-50/50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20 font-mono">
                                     </div>
                                 </div>
                                 <div class="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">

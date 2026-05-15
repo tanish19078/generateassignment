@@ -4,6 +4,8 @@ import io
 import time
 import os
 import traceback
+import urllib.error
+import urllib.request
 from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -18,6 +20,191 @@ from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__, static_folder='public', static_url_path='')
 CORS(app)
+
+
+LLM_PROVIDERS = {
+    'groq': {
+        'label': 'Groq',
+        'base_url': 'https://api.groq.com/openai/v1',
+        'env_vars': ['GROQ_API_KEY'],
+        'api_format': 'openai',
+        'requires_key': True,
+    },
+    'cerebras': {
+        'label': 'Cerebras',
+        'base_url': 'https://api.cerebras.ai/v1',
+        'env_vars': ['CEREBRAS_API_KEY'],
+        'api_format': 'openai',
+        'requires_key': True,
+    },
+    'freemodel_openai': {
+        'label': 'FreeModel OpenAI',
+        'base_url': 'https://api.freemodel.dev/v1',
+        'env_vars': ['FREEMODEL_OPENAI_API_KEY', 'FREEMODEL_API_KEY'],
+        'api_format': 'openai',
+        'requires_key': True,
+    },
+    'freemodel_anthropic': {
+        'label': 'FreeModel Claude',
+        'base_url': 'https://cc.freemodel.dev/v1',
+        'env_vars': ['FREEMODEL_ANTHROPIC_API_KEY', 'FREEMODEL_API_KEY'],
+        'api_format': 'anthropic',
+        'anthropic_version': '2023-06-01',
+        'max_tokens': 4096,
+        'requires_key': True,
+    },
+}
+
+
+def get_env_values(env_names):
+    values = []
+
+    for env_name in env_names:
+        value = os.getenv(env_name)
+        if value:
+            values.append(value)
+
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, 'r', encoding='utf-8') as env_file:
+                for line in env_file:
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith('#') or '=' not in stripped:
+                        continue
+
+                    key, value = stripped.split('=', 1)
+                    if key.strip() in env_names and value.strip():
+                        values.append(value.strip().strip('"').strip("'"))
+        except OSError:
+            pass
+
+    deduped = []
+    for value in values:
+        if value not in deduped:
+            deduped.append(value)
+
+    return deduped
+
+
+def get_provider_keys(provider_config, submitted_key):
+    env_keys = get_env_values(provider_config.get('env_vars', []))
+    if submitted_key:
+        return [submitted_key] + [key for key in env_keys if key != submitted_key]
+
+    return env_keys
+
+
+def parse_openai_chat_response(provider_config, body):
+    parsed = json.loads(body)
+    try:
+        return parsed['choices'][0]['message']['content']
+    except (KeyError, IndexError, TypeError) as err:
+        raise ValueError(f"Malformed {provider_config['label']} response: {body[:500]}") from err
+
+
+def parse_anthropic_message_response(provider_config, body):
+    parsed = json.loads(body)
+    content = parsed.get('content')
+
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        text_blocks = []
+        for block in content:
+            if isinstance(block, str):
+                text_blocks.append(block)
+            elif isinstance(block, dict) and block.get('text'):
+                text_blocks.append(block['text'])
+
+        if text_blocks:
+            return '\n'.join(text_blocks)
+
+    try:
+        return parsed['choices'][0]['message']['content']
+    except (KeyError, IndexError, TypeError) as err:
+        raise ValueError(f"Malformed {provider_config['label']} response: {body[:500]}") from err
+
+
+def build_anthropic_payload(provider_config, model, messages):
+    system_parts = []
+    anthropic_messages = []
+
+    for message in messages:
+        role = message.get('role', 'user')
+        content = message.get('content', '')
+
+        if role == 'system':
+            system_parts.append(content)
+            continue
+
+        if role not in ('user', 'assistant'):
+            role = 'user'
+
+        anthropic_messages.append({
+            'role': role,
+            'content': content,
+        })
+
+    payload = {
+        'model': model,
+        'max_tokens': provider_config.get('max_tokens', 4096),
+        'messages': anthropic_messages or [{'role': 'user', 'content': ''}],
+    }
+
+    if system_parts:
+        payload['system'] = '\n\n'.join(system_parts)
+
+    return payload
+
+
+def create_chat_completion(provider_key, api_key, model, messages):
+    provider_config = LLM_PROVIDERS.get(provider_key)
+    if not provider_config:
+        raise ValueError(f"Unsupported LLM provider: {provider_key}")
+
+    if provider_config.get('requires_key') and not api_key:
+        env_hint = ' or '.join(provider_config.get('env_vars', []))
+        raise ValueError(f"{provider_config['label']} API key not found. Enter a key or set {env_hint}.")
+
+    api_format = provider_config.get('api_format', 'openai')
+    if api_format == 'anthropic':
+        url = provider_config['base_url'].rstrip('/') + '/messages'
+        payload = build_anthropic_payload(provider_config, model, messages)
+    else:
+        url = provider_config['base_url'].rstrip('/') + '/chat/completions'
+        payload = {
+            'model': model,
+            'messages': messages,
+        }
+
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'PractiGen/5.2',
+    }
+    if api_key and api_format == 'anthropic':
+        headers['x-api-key'] = api_key
+        headers['anthropic-version'] = provider_config.get('anthropic_version', '2023-06-01')
+    elif api_key:
+        headers['Authorization'] = f'Bearer {api_key}'
+
+    req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as response:
+            body = response.read().decode('utf-8')
+    except urllib.error.HTTPError as err:
+        body = err.read().decode('utf-8', errors='replace')
+        raise RuntimeError(f"{provider_config['label']} API error {err.code}: {body}") from err
+    except urllib.error.URLError as err:
+        raise RuntimeError(f"{provider_config['label']} API connection error: {err.reason}") from err
+
+    if api_format == 'anthropic':
+        return parse_anthropic_message_response(provider_config, body)
+
+    return parse_openai_chat_response(provider_config, body)
 
 # ==================== OS-Specific Aims (pre-loaded) ====================
 OS_AIMS_FILE = os.path.join(os.path.dirname(__file__), '..', 'os_aims.txt')
@@ -81,6 +268,7 @@ def api_generate():
         data = request.get_json()
         aim = data.get('aim', '')
         api_key = data.get('api_key', '')
+        provider = data.get('provider', 'groq')
         model = data.get('model', 'llama-3.3-70b-versatile')
         
         terminal_user = data.get('terminal_user', 'student')
@@ -91,13 +279,10 @@ def api_generate():
         if not terminal_host.strip():
             terminal_host = 'kali'
 
-        if not api_key:
-            api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise ValueError("GROQ_API_KEY not found in session or environment.")
-
-        from groq import Groq
-        client = Groq(api_key=api_key)
+        selected_provider_config = LLM_PROVIDERS.get(provider)
+        if not selected_provider_config:
+            raise ValueError(f"Unsupported LLM provider: {provider}")
+        selected_api_keys = get_provider_keys(selected_provider_config, api_key)
 
         prompt = f"""You are a professional Linux systems instructor preparing a practical lab file for a university Operating Systems course. Your instructor has assigned this aim:
 
@@ -150,11 +335,74 @@ CRITICAL — Terminal output rules:
 [CAPTION]
 3-5 word caption for the experiment.
 """
-        chat_completion = client.chat.completions.create(
-            messages=[{'role': 'user', 'content': prompt}],
-            model=model,
-        )
-        raw_text = chat_completion.choices[0].message.content
+        provider_attempts = [{
+            'provider': provider,
+            'model': model,
+            'config': selected_provider_config,
+            'keys': selected_api_keys,
+        }]
+        if provider == 'cerebras':
+            groq_config = LLM_PROVIDERS['groq']
+            provider_attempts.append({
+                'provider': 'groq',
+                'model': 'llama-3.3-70b-versatile',
+                'config': groq_config,
+                'keys': get_provider_keys(groq_config, ''),
+            })
+
+        max_retries = 3
+        raw_text = None
+        for attempt in range(max_retries + 1):
+            for provider_attempt in provider_attempts:
+                attempt_provider = provider_attempt['provider']
+                attempt_model = provider_attempt['model']
+                attempt_config = provider_attempt['config']
+                attempt_keys = provider_attempt['keys']
+
+                for key_index, selected_key in enumerate(attempt_keys or ['']):
+                    try:
+                        raw_text = create_chat_completion(
+                            attempt_provider,
+                            selected_key,
+                            model=attempt_model,
+                            messages=[{'role': 'user', 'content': prompt}],
+                        )
+                        break
+                    except Exception as api_err:
+                        err_str = str(api_err)
+                        is_rate_limited = '429' in err_str or 'rate' in err_str.lower()
+                        is_bad_key = (
+                            '401' in err_str
+                            or 'invalid api key' in err_str.lower()
+                            or 'expired_api_key' in err_str.lower()
+                            or 'authentication' in err_str.lower()
+                        )
+                        has_backup_key = key_index < len(attempt_keys) - 1
+
+                        if (is_rate_limited or is_bad_key) and has_backup_key:
+                            print(f"{attempt_config['label']} key {key_index + 1} failed. Trying backup key...")
+                            continue
+
+                        if is_rate_limited and provider_attempt is not provider_attempts[-1]:
+                            print(f"{attempt_config['label']} is busy. Falling back to {provider_attempts[-1]['config']['label']}...")
+                            break
+
+                        if is_rate_limited and attempt < max_retries:
+                            wait_time = 15 * (2 ** attempt)
+                            print(f"Rate limited. Waiting {wait_time}s before retry {attempt + 1}/{max_retries}...")
+                            time.sleep(wait_time)
+                            break
+
+                        raise
+
+                if raw_text:
+                    break
+
+            if raw_text:
+                break
+
+        if not raw_text:
+            raise ValueError("No response received from the selected LLM provider.")
 
         def extract_section(tag, text):
             pattern = rf"\[{tag}\](.*?)(?=\[(?:CONCEPT|PROCEDURE|CAPTION)\]|$)"
@@ -198,6 +446,8 @@ CRITICAL — Terminal output rules:
         status_code = 500
         if "401" in error_msg or "Invalid API Key" in error_msg or "Authentication" in error_msg:
             status_code = 401
+        elif "403" in error_msg:
+            status_code = 403
         elif "429" in error_msg or "Rate limit" in error_msg:
             status_code = 429
         return jsonify({'error': error_msg}), status_code

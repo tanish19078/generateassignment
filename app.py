@@ -27,12 +27,30 @@ LLM_PROVIDERS = {
         'label': 'Groq',
         'base_url': 'https://api.groq.com/openai/v1',
         'env_vars': ['GROQ_API_KEY'],
+        'api_format': 'openai',
         'requires_key': True,
     },
     'cerebras': {
         'label': 'Cerebras',
         'base_url': 'https://api.cerebras.ai/v1',
         'env_vars': ['CEREBRAS_API_KEY'],
+        'api_format': 'openai',
+        'requires_key': True,
+    },
+    'freemodel_openai': {
+        'label': 'FreeModel OpenAI',
+        'base_url': 'https://api.freemodel.dev/v1',
+        'env_vars': ['FREEMODEL_OPENAI_API_KEY', 'FREEMODEL_API_KEY'],
+        'api_format': 'openai',
+        'requires_key': True,
+    },
+    'freemodel_anthropic': {
+        'label': 'FreeModel Claude',
+        'base_url': 'https://cc.freemodel.dev/v1',
+        'env_vars': ['FREEMODEL_ANTHROPIC_API_KEY', 'FREEMODEL_API_KEY'],
+        'api_format': 'anthropic',
+        'anthropic_version': '2023-06-01',
+        'max_tokens': 4096,
         'requires_key': True,
     },
 }
@@ -77,6 +95,70 @@ def get_provider_keys(provider_config, submitted_key):
     return env_keys
 
 
+def parse_openai_chat_response(provider_config, body):
+    parsed = json.loads(body)
+    try:
+        return parsed['choices'][0]['message']['content']
+    except (KeyError, IndexError, TypeError) as err:
+        raise ValueError(f"Malformed {provider_config['label']} response: {body[:500]}") from err
+
+
+def parse_anthropic_message_response(provider_config, body):
+    parsed = json.loads(body)
+    content = parsed.get('content')
+
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        text_blocks = []
+        for block in content:
+            if isinstance(block, str):
+                text_blocks.append(block)
+            elif isinstance(block, dict) and block.get('text'):
+                text_blocks.append(block['text'])
+
+        if text_blocks:
+            return '\n'.join(text_blocks)
+
+    try:
+        return parsed['choices'][0]['message']['content']
+    except (KeyError, IndexError, TypeError) as err:
+        raise ValueError(f"Malformed {provider_config['label']} response: {body[:500]}") from err
+
+
+def build_anthropic_payload(provider_config, model, messages):
+    system_parts = []
+    anthropic_messages = []
+
+    for message in messages:
+        role = message.get('role', 'user')
+        content = message.get('content', '')
+
+        if role == 'system':
+            system_parts.append(content)
+            continue
+
+        if role not in ('user', 'assistant'):
+            role = 'user'
+
+        anthropic_messages.append({
+            'role': role,
+            'content': content,
+        })
+
+    payload = {
+        'model': model,
+        'max_tokens': provider_config.get('max_tokens', 4096),
+        'messages': anthropic_messages or [{'role': 'user', 'content': ''}],
+    }
+
+    if system_parts:
+        payload['system'] = '\n\n'.join(system_parts)
+
+    return payload
+
+
 def create_chat_completion(provider_key, api_key, model, messages):
     provider_config = LLM_PROVIDERS.get(provider_key)
     if not provider_config:
@@ -86,21 +168,29 @@ def create_chat_completion(provider_key, api_key, model, messages):
         env_hint = ' or '.join(provider_config.get('env_vars', []))
         raise ValueError(f"{provider_config['label']} API key not found. Enter a key or set {env_hint}.")
 
-    url = provider_config['base_url'].rstrip('/') + '/chat/completions'
-    payload = json.dumps({
-        'model': model,
-        'messages': messages,
-    }).encode('utf-8')
+    api_format = provider_config.get('api_format', 'openai')
+    if api_format == 'anthropic':
+        url = provider_config['base_url'].rstrip('/') + '/messages'
+        payload = build_anthropic_payload(provider_config, model, messages)
+    else:
+        url = provider_config['base_url'].rstrip('/') + '/chat/completions'
+        payload = {
+            'model': model,
+            'messages': messages,
+        }
 
     headers = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
         'User-Agent': 'PractiGen/5.2',
     }
-    if api_key:
+    if api_key and api_format == 'anthropic':
+        headers['x-api-key'] = api_key
+        headers['anthropic-version'] = provider_config.get('anthropic_version', '2023-06-01')
+    elif api_key:
         headers['Authorization'] = f'Bearer {api_key}'
 
-    req = urllib.request.Request(url, data=payload, headers=headers, method='POST')
+    req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
 
     try:
         with urllib.request.urlopen(req, timeout=120) as response:
@@ -111,11 +201,10 @@ def create_chat_completion(provider_key, api_key, model, messages):
     except urllib.error.URLError as err:
         raise RuntimeError(f"{provider_config['label']} API connection error: {err.reason}") from err
 
-    parsed = json.loads(body)
-    try:
-        return parsed['choices'][0]['message']['content']
-    except (KeyError, IndexError, TypeError) as err:
-        raise ValueError(f"Malformed {provider_config['label']} response: {body[:500]}") from err
+    if api_format == 'anthropic':
+        return parse_anthropic_message_response(provider_config, body)
+
+    return parse_openai_chat_response(provider_config, body)
 
 @app.route('/')
 def serve_index():

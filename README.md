@@ -15,7 +15,7 @@ PractiGen is an AI-powered tool designed to automate the creation of programming
 
 - **Frontend**: Vanilla JavaScript (ES6+), CSS3 (Custom Properties, Glassmorphism), Semantic HTML5.
 - **Backend**: Python 3.9+ (Serverless Functions).
-- **API**: Provider-selectable LLM inference through Groq and Cerebras.
+- **API**: Provider-selectable LLM inference through Groq, Cerebras, FreeModel OpenAI-compatible chat completions, and FreeModel Anthropic-compatible messages.
 - **Document Generation**: `python-docx` for structured Word document creation.
 - **Styling**: Modern dark-themed UI with responsive grid layouts and animations.
 
@@ -44,6 +44,13 @@ PractiGen is an AI-powered tool designed to automate the creation of programming
    - `GROQ_API_KEY`
    - repeated `GROQ_API_KEY` entries are used as backup keys
    - `CEREBRAS_API_KEY`
+   - `FREEMODEL_API_KEY`
+   - `FREEMODEL_OPENAI_API_KEY`
+   - `FREEMODEL_ANTHROPIC_API_KEY`
+
+   The FreeModel OpenAI preset calls `https://api.freemodel.dev/v1/chat/completions`.
+   The FreeModel Claude preset calls `https://cc.freemodel.dev/v1/messages`.
+   Use the Custom Model ID field when your FreeModel account exposes a different model name.
 
 ## 📂 Project Structure
 
