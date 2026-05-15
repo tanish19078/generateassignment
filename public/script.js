@@ -78,6 +78,26 @@ const getSettings = () => ({
     outputFilename: 'PractiGen_Artifact.docx'
 });
 
+const MAX_EXPORT_OUTPUT_LINES = 90;
+const MAX_EXPORT_LINE_CHARS = 180;
+
+function compactOutputForExport(output) {
+    const lines = String(output || '').split('\n');
+    let shortened = lines.length > MAX_EXPORT_OUTPUT_LINES;
+
+    const compacted = lines.slice(0, MAX_EXPORT_OUTPUT_LINES).map((line) => {
+        if (line.length <= MAX_EXPORT_LINE_CHARS) return line;
+        shortened = true;
+        return `${line.slice(0, MAX_EXPORT_LINE_CHARS - 3)}...`;
+    });
+
+    if (shortened) {
+        compacted.push(`[Output shortened for export. Showing first ${MAX_EXPORT_OUTPUT_LINES} lines.]`);
+    }
+
+    return compacted.join('\n');
+}
+
 function getDownloadExperiments() {
     const mode = genModeInputs();
 
@@ -95,7 +115,7 @@ function getDownloadExperiments() {
                     num: step.num,
                     explanation: step.explanation,
                     command: step.command,
-                    output: step.output
+                    output: compactOutputForExport(step.output)
                 }))
             };
         }
@@ -103,7 +123,7 @@ function getDownloadExperiments() {
         return {
             ...base,
             code: exp.code,
-            output: exp.output
+            output: compactOutputForExport(exp.output)
         };
     });
 }

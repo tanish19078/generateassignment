@@ -50,6 +50,7 @@ LLM_PROVIDERS = {
         'env_vars': ['FREEMODEL_ANTHROPIC_API_KEY', 'FREEMODEL_API_KEY'],
         'api_format': 'anthropic',
         'anthropic_version': '2023-06-01',
+        'fallback_model': 'claude-sonnet-4-6',
         'max_tokens': 4096,
         'requires_key': True,
     },
@@ -349,6 +350,15 @@ CRITICAL — Terminal output rules:
                 'config': groq_config,
                 'keys': get_provider_keys(groq_config, ''),
             })
+        if provider == 'freemodel_anthropic':
+            fallback_model = selected_provider_config.get('fallback_model', 'claude-sonnet-4-6')
+            if model != fallback_model:
+                provider_attempts.append({
+                    'provider': provider,
+                    'model': fallback_model,
+                    'config': selected_provider_config,
+                    'keys': selected_api_keys,
+                })
 
         max_retries = 3
         raw_text = None
@@ -377,11 +387,19 @@ CRITICAL — Terminal output rules:
                             or 'expired_api_key' in err_str.lower()
                             or 'authentication' in err_str.lower()
                         )
+                        is_invalid_model = (
+                            'invalid_request' in err_str.lower()
+                            and 'model' in err_str.lower()
+                        ) or '暂未开放' in err_str
                         has_backup_key = key_index < len(attempt_keys) - 1
 
                         if (is_rate_limited or is_bad_key) and has_backup_key:
                             print(f"{attempt_config['label']} key {key_index + 1} failed. Trying backup key...")
                             continue
+
+                        if is_invalid_model and provider_attempt is not provider_attempts[-1]:
+                            print(f"{attempt_config['label']} model {attempt_model} failed. Trying fallback model...")
+                            break
 
                         if is_rate_limited and provider_attempt is not provider_attempts[-1]:
                             print(f"{attempt_config['label']} is busy. Falling back to {provider_attempts[-1]['config']['label']}...")
@@ -669,6 +687,24 @@ def add_caption_para(doc, text, experiment_no, step_no=None, font_name='Times Ne
     run.font.size = Pt(size)
 
 
+def get_terminal_lines(output_text, max_lines=90, max_line_chars=180):
+    raw_lines = str(output_text or '').split('\n')
+    lines = []
+    shortened = len(raw_lines) > max_lines
+
+    for raw_line in raw_lines[:max_lines]:
+        line = raw_line.replace('\r', '')
+        if len(line) > max_line_chars:
+            line = line[:max_line_chars - 3] + '...'
+            shortened = True
+        lines.append(line)
+
+    if shortened:
+        lines.append(f'[Output shortened for export. Showing first {max_lines} lines.]')
+
+    return lines or ['']
+
+
 def create_terminal_image(output_text, img_width=600):
     width = img_width
     font_size = 16
@@ -682,7 +718,7 @@ def create_terminal_image(output_text, img_width=600):
         except IOError:
             font = ImageFont.load_default()
 
-    lines = str(output_text).split('\n')
+    lines = get_terminal_lines(output_text)
     line_height = font_size + 9 
     height = (len(lines) * line_height) + (2 * padding)
     
@@ -692,7 +728,7 @@ def create_terminal_image(output_text, img_width=600):
     y = padding
     for line in lines:
         try:
-            text_line = line.replace('\r', '')
+            text_line = line
             d.text((padding, y), text_line, font=font, fill=(201, 219, 213))
         except:
             pass
