@@ -514,29 +514,98 @@ def add_code_para(doc, code_text, font_name='Times New Roman', size=10):
     run.font.size = Pt(size)
 
 
-def make_short_caption(text, fallback='Terminal Output', max_words=5, max_chars=45):
+COMMAND_CAPTIONS = {
+    'cal': 'Calendar Output',
+    'cat': 'File Content Output',
+    'cc': 'Compilation Output',
+    'cd': 'Directory Change Output',
+    'chmod': 'Permission Change Output',
+    'chown': 'Ownership Change Output',
+    'clear': 'Clear Screen Output',
+    'cp': 'File Copy Output',
+    'date': 'Date Command Output',
+    'df': 'Disk Usage Output',
+    'du': 'Storage Usage Output',
+    'echo': 'Echo Command Output',
+    'find': 'File Search Output',
+    'free': 'Memory Usage Output',
+    'gcc': 'Compilation Output',
+    'grep': 'Search Command Output',
+    'help': 'Shell Help Output',
+    'history': 'Command History Output',
+    'hostname': 'Hostname Output',
+    'id': 'User Identity Output',
+    'java': 'Program Execution Output',
+    'javac': 'Compilation Output',
+    'ls': 'Directory Listing Output',
+    'make': 'Build Output',
+    'man': 'Manual Page Output',
+    'mkdir': 'Directory Creation Output',
+    'mv': 'File Move Output',
+    'ps': 'Process List Output',
+    'pwd': 'Working Directory Output',
+    'python': 'Program Execution Output',
+    'python3': 'Program Execution Output',
+    'reboot': 'Reboot Command Output',
+    'rm': 'File Removal Output',
+    'rmdir': 'Directory Removal Output',
+    'sh': 'Script Execution Output',
+    'stat': 'File Status Output',
+    'su': 'User Switch Output',
+    'sudo': 'Privilege Command Output',
+    'top': 'Process Monitor Output',
+    'touch': 'File Creation Output',
+    'tty': 'Terminal Device Output',
+    'uname': 'System Information Output',
+    'uptime': 'System Uptime Output',
+    'who': 'Logged-In Users Output',
+    'whoami': 'Current User Output',
+}
+
+
+def make_caption_text(text, fallback='Terminal Output', max_words=8, max_chars=70):
     cleaned = re.sub(r'\s+', ' ', str(text or '')).strip()
     cleaned = re.sub(r'^Step\s*\d+\s*[:.)-]\s*', '', cleaned, flags=re.IGNORECASE)
     cleaned = cleaned.strip(' .:-')
 
     if not cleaned:
-        cleaned = fallback
+        return fallback
 
-    words = cleaned.split()
-    if len(words) > max_words:
-        cleaned = ' '.join(words[:max_words])
-
-    if len(cleaned) > max_chars:
-        clipped = cleaned[:max_chars].rsplit(' ', 1)[0]
-        cleaned = (clipped or cleaned[:max_chars]).strip(' .:-')
+    if len(cleaned.split()) > max_words or len(cleaned) > max_chars:
+        return fallback
 
     return cleaned or fallback
+
+
+def make_step_caption(command, fallback='Terminal Output'):
+    lines = [line.strip() for line in str(command or '').splitlines() if line.strip()]
+    if not lines:
+        return fallback
+
+    first_line = re.sub(r'^[\w.-]+@[\w.-]+:.*?[#$]\s*', '', lines[0]).strip()
+    first_line = re.sub(r'^\$\s*', '', first_line).strip()
+    first_line = re.split(r'\s*(?:&&|\|\||;|\|)\s*', first_line, maxsplit=1)[0].strip()
+
+    if not first_line:
+        return fallback
+
+    command_match = re.match(r'([./\w+-]+)', first_line)
+    if not command_match:
+        return fallback
+
+    command_name = command_match.group(1).strip()
+    base_name = command_name.replace('\\', '/').split('/')[-1].lower()
+
+    if command_name.startswith('./'):
+        return 'Program Execution Output'
+
+    return COMMAND_CAPTIONS.get(base_name, f'Output of {base_name} Command')
 
 
 def add_caption_para(doc, text, experiment_no, step_no=None, font_name='Times New Roman', size=10):
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    caption_text = make_short_caption(text)
+    caption_text = make_caption_text(text)
     if step_no:
         label = f'Figure {experiment_no}.{step_no} - {caption_text}'
     else:
@@ -674,7 +743,7 @@ def api_download():
                                 pic_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 run = pic_para.add_run()
                                 run.add_picture(img_buf, width=Inches(image_width_inches))
-                                add_caption_para(doc, explanation, i, step_num, font_name, caption_size)
+                                add_caption_para(doc, make_step_caption(command), i, step_num, font_name, caption_size)
                             except Exception as img_err:
                                 print(f"DEBUG: Step {step_num} image error: {img_err}")
                                 add_code_para(doc, output, font_name, code_size)
