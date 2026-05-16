@@ -3,6 +3,7 @@ import re
 import io
 import time
 import os
+import gzip
 import traceback
 import urllib.error
 import urllib.request
@@ -20,6 +21,41 @@ from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__, static_folder='public', static_url_path='')
 CORS(app)
+
+
+MAX_COMPRESSED_DOWNLOAD_BYTES = 3_500_000
+MAX_DECOMPRESSED_DOWNLOAD_BYTES = 50_000_000
+
+
+class DownloadRequestError(ValueError):
+    pass
+
+
+def read_download_payload():
+    encoding = request.headers.get('X-Content-Encoding', '').strip().lower()
+    body = request.get_data(cache=False)
+
+    if encoding == 'gzip':
+        if len(body) > MAX_COMPRESSED_DOWNLOAD_BYTES:
+            raise DownloadRequestError('Compressed export payload is too large for this deployment.')
+
+        try:
+            body = gzip.decompress(body)
+        except (OSError, EOFError) as err:
+            raise DownloadRequestError('Compressed export payload could not be decoded.') from err
+    elif encoding not in ('', 'identity'):
+        raise DownloadRequestError(f'Unsupported export payload encoding: {encoding}')
+
+    if not body:
+        return None
+
+    if len(body) > MAX_DECOMPRESSED_DOWNLOAD_BYTES:
+        raise DownloadRequestError('Export payload is too large after decompression.')
+
+    try:
+        return json.loads(body.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError) as err:
+        raise DownloadRequestError('Export payload is not valid JSON.') from err
 
 
 LLM_PROVIDERS = {
@@ -797,7 +833,7 @@ def add_normal_para(doc, text, font_name='Times New Roman', size=12, align=None)
 @app.route('/api/download', methods=['POST'])
 def api_download():
     try:
-        data = request.get_json()
+        data = read_download_payload()
         if not data:
             return jsonify({'error': 'No data received for export.'}), 400
             
@@ -928,6 +964,8 @@ def api_download():
             as_attachment=True,
             download_name=output_filename
         )
+    except DownloadRequestError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         print(f"CRITICAL EXPORT ERROR: {traceback.format_exc()}")
         return jsonify({'error': f'Export Pipeline Fault: {str(e)}'}), 500

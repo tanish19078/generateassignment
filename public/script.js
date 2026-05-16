@@ -78,7 +78,8 @@ const getSettings = () => ({
     outputFilename: 'PractiGen_Artifact.docx'
 });
 
-const MAX_EXPORT_PAYLOAD_BYTES = 2_750_000;
+const MAX_RAW_EXPORT_BYTES = 2_750_000;
+const MAX_COMPRESSED_EXPORT_BYTES = 3_500_000;
 const EXPORT_PROFILES = [
     { lines: 28, chars: 120 },
     { lines: 14, chars: 100 },
@@ -156,12 +157,53 @@ function getDownloadPayload(settings) {
         const bytes = new Blob([body]).size;
         lastResult = { payload, body, bytes, profile, unitCount };
 
-        if (bytes <= MAX_EXPORT_PAYLOAD_BYTES) {
+        if (bytes <= MAX_RAW_EXPORT_BYTES) {
             return lastResult;
         }
     }
 
     return lastResult;
+}
+
+async function gzipText(text) {
+    if (!('CompressionStream' in window)) {
+        return null;
+    }
+
+    const compressedStream = new Blob([text])
+        .stream()
+        .pipeThrough(new CompressionStream('gzip'));
+
+    return await new Response(compressedStream).arrayBuffer();
+}
+
+async function getDownloadRequest(downloadPayload) {
+    const compressed = await gzipText(downloadPayload.body);
+
+    if (!compressed) {
+        if (downloadPayload.bytes > MAX_RAW_EXPORT_BYTES) {
+            throw new Error('This browser cannot compress a large export payload. Update Chrome/Edge and try again.');
+        }
+
+        return {
+            body: downloadPayload.body,
+            headers: { 'Content-Type': 'application/json' },
+            compressedBytes: null
+        };
+    }
+
+    if (compressed.byteLength > MAX_COMPRESSED_EXPORT_BYTES) {
+        throw new Error(`Compressed export is still too large (${Math.round(compressed.byteLength / 1024)} KB). Reduce generated output length and retry.`);
+    }
+
+    return {
+        body: compressed,
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Content-Encoding': 'gzip'
+        },
+        compressedBytes: compressed.byteLength
+    };
 }
 
 // Progress
@@ -373,11 +415,15 @@ function setupEventListeners() {
         try {
             const settings = getSettings();
             const downloadPayload = getDownloadPayload(settings);
-            terminalLog(`➜ Export payload prepared (${Math.round(downloadPayload.bytes / 1024)} KB, ${downloadPayload.profile.lines}-line output profile).`);
+            const downloadRequest = await getDownloadRequest(downloadPayload);
+            const compressedLog = downloadRequest.compressedBytes
+                ? `, compressed to ${Math.round(downloadRequest.compressedBytes / 1024)} KB`
+                : '';
+            terminalLog(`➜ Export payload prepared (${Math.round(downloadPayload.bytes / 1024)} KB${compressedLog}, ${downloadPayload.profile.lines}-line output profile).`);
             const res = await fetch('/api/download', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: downloadPayload.body,
+                headers: downloadRequest.headers,
+                body: downloadRequest.body,
             });
 
             if (!res.ok) {
@@ -398,7 +444,7 @@ function setupEventListeners() {
         } catch (err) {
             console.error(err);
             const message = err instanceof TypeError && err.message === 'Failed to fetch'
-                ? 'Download service is unreachable or the request was too large. Try fewer experiments or smaller terminal output.'
+                ? 'Download service did not respond. Refresh after deployment finishes, then retry.'
                 : err.message;
             showToast(`Bundle export error: ${message}`, "error");
             terminalLog(`➜ CRITICAL: ${message}`);
