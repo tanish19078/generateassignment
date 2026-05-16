@@ -78,27 +78,31 @@ const getSettings = () => ({
     outputFilename: 'PractiGen_Artifact.docx'
 });
 
-const MAX_EXPORT_OUTPUT_LINES = 90;
-const MAX_EXPORT_LINE_CHARS = 180;
+const MAX_EXPORT_PAYLOAD_BYTES = 2_750_000;
+const EXPORT_PROFILES = [
+    { lines: 28, chars: 120 },
+    { lines: 14, chars: 100 },
+    { lines: 8, chars: 90 }
+];
 
-function compactOutputForExport(output) {
+function compactOutputForExport(output, profile) {
     const lines = String(output || '').split('\n');
-    let shortened = lines.length > MAX_EXPORT_OUTPUT_LINES;
+    let shortened = lines.length > profile.lines;
 
-    const compacted = lines.slice(0, MAX_EXPORT_OUTPUT_LINES).map((line) => {
-        if (line.length <= MAX_EXPORT_LINE_CHARS) return line;
+    const compacted = lines.slice(0, profile.lines).map((line) => {
+        if (line.length <= profile.chars) return line;
         shortened = true;
-        return `${line.slice(0, MAX_EXPORT_LINE_CHARS - 3)}...`;
+        return `${line.slice(0, profile.chars - 3)}...`;
     });
 
     if (shortened) {
-        compacted.push(`[Output shortened for export. Showing first ${MAX_EXPORT_OUTPUT_LINES} lines.]`);
+        compacted.push(`[Output shortened for export. Showing first ${profile.lines} lines.]`);
     }
 
     return compacted.join('\n');
 }
 
-function getDownloadExperiments() {
+function getDownloadExperiments(profile) {
     const mode = genModeInputs();
 
     return generatedExperiments.map((exp) => {
@@ -115,7 +119,7 @@ function getDownloadExperiments() {
                     num: step.num,
                     explanation: step.explanation,
                     command: step.command,
-                    output: compactOutputForExport(step.output)
+                    output: compactOutputForExport(step.output, profile)
                 }))
             };
         }
@@ -123,9 +127,41 @@ function getDownloadExperiments() {
         return {
             ...base,
             code: exp.code,
-            output: compactOutputForExport(exp.output)
+            output: compactOutputForExport(exp.output, profile)
         };
     });
+}
+
+function getExportUnitCount() {
+    const mode = genModeInputs();
+    if (mode !== 'os') return generatedExperiments.length;
+
+    return generatedExperiments.reduce((count, exp) => {
+        return count + Math.max((exp.steps || []).length, 1);
+    }, 0);
+}
+
+function getDownloadPayload(settings) {
+    let lastResult = null;
+    const unitCount = getExportUnitCount();
+    const startIndex = unitCount > 450 ? 2 : unitCount > 300 ? 1 : 0;
+
+    for (const profile of EXPORT_PROFILES.slice(startIndex)) {
+        const payload = {
+            experiments: getDownloadExperiments(profile),
+            settings,
+            mode: genModeInputs()
+        };
+        const body = JSON.stringify(payload);
+        const bytes = new Blob([body]).size;
+        lastResult = { payload, body, bytes, profile, unitCount };
+
+        if (bytes <= MAX_EXPORT_PAYLOAD_BYTES) {
+            return lastResult;
+        }
+    }
+
+    return lastResult;
 }
 
 // Progress
@@ -336,14 +372,12 @@ function setupEventListeners() {
 
         try {
             const settings = getSettings();
+            const downloadPayload = getDownloadPayload(settings);
+            terminalLog(`➜ Export payload prepared (${Math.round(downloadPayload.bytes / 1024)} KB, ${downloadPayload.profile.lines}-line output profile).`);
             const res = await fetch('/api/download', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    experiments: getDownloadExperiments(),
-                    settings: settings,
-                    mode: genModeInputs()
-                }),
+                body: downloadPayload.body,
             });
 
             if (!res.ok) {

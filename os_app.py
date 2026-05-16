@@ -687,7 +687,7 @@ def add_caption_para(doc, text, experiment_no, step_no=None, font_name='Times Ne
     run.font.size = Pt(size)
 
 
-def get_terminal_lines(output_text, max_lines=90, max_line_chars=180):
+def get_terminal_lines(output_text, max_lines=28, max_line_chars=120):
     raw_lines = str(output_text or '').split('\n')
     lines = []
     shortened = len(raw_lines) > max_lines
