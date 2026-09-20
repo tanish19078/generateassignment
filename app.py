@@ -418,6 +418,68 @@ def validate_generation_result(mode, code, concept):
         raise ValueError("LLM returned no concept/theory. Retry needed.")
 
 
+# ==================== OPTIONAL JEV QUALITY GATE ====================
+def run_jev_quality_gate(aim, mode, target_language, result):
+    """Return advisory typed quality signals without changing generated content."""
+    api_key = os.getenv('OPENROUTER_API_KEY', '').strip()
+    if not api_key:
+        return {'enabled': False, 'status': 'unavailable',
+                'reason': 'OPENROUTER_API_KEY is not configured on the server.'}
+
+    code = result.get('code', '') or ''
+    concept = result.get('concept', '') or ''
+    output = result.get('output', '') or ''
+    state = {
+        'aim': aim,
+        'mode': mode,
+        'targetLanguage': target_language or None,
+        'checks': {
+            'hasConcept': bool(concept.strip()), 'hasCode': bool(code.strip()),
+            'hasOutput': bool(output.strip()),
+            'languageValidationPassed': not target_language or validate_code_language(code, target_language),
+            'conceptCharacters': len(concept), 'codeCharacters': len(code),
+            'outputCharacters': len(output),
+        },
+    }
+    payload = {
+        'model': 'typesafe/jev-1.13', 'state': state,
+        'questions': {
+            'decision': {
+                'type': 'choice', 'instructions': 'Assess readiness for student review using only the supplied state.',
+                'criteria': {
+                    'readyForReview': 'Required sections and requested-language checks are present.',
+                    'needsRegeneration': 'A required section or requested-language check is missing.',
+                    'needsStudentClarification': 'The aim is too underspecified for a useful practical.',
+                },
+            },
+            'primaryConcern': {
+                'type': 'choice', 'instructions': 'Choose the main quality concern visible from the state.',
+                'criteria': {
+                    'none': 'No concern is visible from the supplied state.',
+                    'missingSection': 'Theory, code, or output is missing.',
+                    'wrongLanguage': 'The code failed the requested-language check.',
+                    'underspecifiedAim': 'The aim lacks essential implementation detail.',
+                },
+            },
+            'needsHumanReview': {
+                'type': 'noul', 'instructions': 'How likely is it that a human should inspect this before export?',
+                'criteria': {'true': 'A material concern or ambiguity is present.',
+                             'false': 'The supplied checks show no material concern.'},
+            },
+        },
+    }
+    request_obj = urllib.request.Request(
+        'https://openrouter.ai/api/alpha/decisions', data=json.dumps(payload).encode('utf-8'),
+        headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}, method='POST',
+    )
+    try:
+        with urllib.request.urlopen(request_obj, timeout=15) as response:
+            body = json.loads(response.read().decode('utf-8'))
+        return {'enabled': True, 'status': 'complete', 'answers': body.get('answers', {})}
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError) as err:
+        return {'enabled': True, 'status': 'unavailable', 'reason': str(err)}
+
+
 # ==================== AUTO-DETECT (Phase 3) ====================
 _OS_CUES = re.compile(
     r'\b(ls|cat|grep|chmod|chown|mkdir|touch|awk|sed|pwd|ps|kill|df|du|'
@@ -825,6 +887,9 @@ def api_generate():
                     raise ValueError(
                         f"LLM repeatedly produced code in the wrong language (expected {target_language})."
                     )
+
+        if bool(data.get('jev_quality_gate', False)):
+            result['quality_gate'] = run_jev_quality_gate(aim, mode, target_language, result)
 
         return jsonify(result)
     except Exception as e:
