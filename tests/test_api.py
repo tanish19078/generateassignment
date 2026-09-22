@@ -255,3 +255,87 @@ def test_extract_aims_rejects_non_pdf(client):
 def test_extract_aims_requires_file(client):
     r = client.post("/api/extract-aims", data={}, content_type="multipart/form-data")
     assert r.status_code == 400
+
+
+# --- Jev advisory quality gate (never blocks generation) ----------------------
+JEV_OK = {
+    "answers": {
+        "decision": {"type": "choice", "choice": "readyForReview", "confidence": 0.94},
+        "primaryConcern": {"type": "choice", "choice": "none", "confidence": 0.9},
+        "needsHumanReview": {"type": "noul", "noul": 0.05},
+        "submissionReadiness": {
+            "type": "score", "score": 1.9,
+            "legend": {"0": "1 - bad", "1": "3 - ok", "2": "5 - ready"},
+        },
+    }
+}
+
+
+def _generate(client, **overrides):
+    body = {"aim": "Sort", "mode": "general", "code_language": "python"}
+    body.update(overrides)
+    return client.post("/api/generate", json=body)
+
+
+def test_generate_gate_disabled_makes_no_call(client, capture, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    called = []
+    monkeypatch.setattr(app_module, "call_jev_decisions",
+                        lambda *a, **k: called.append(1) or JEV_OK)
+
+    r = _generate(client, jev_quality_gate=False)
+    assert r.status_code == 200
+    assert "quality_gate" not in r.get_json()
+    assert called == []
+
+
+def test_generate_gate_runs_by_default(client, capture, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    monkeypatch.setattr(app_module, "call_jev_decisions", lambda *a, **k: JEV_OK)
+
+    data = _generate(client).get_json()
+    gate = data["quality_gate"]
+    assert gate["enabled"] is True
+    assert gate["status"] == "complete"
+    assert gate["summary"]["decision"] == "readyForReview"
+    assert gate["summary"]["clean"] is True
+
+
+def test_generate_succeeds_when_gate_raises(client, capture, monkeypatch):
+    """The whole point of the feature: a Jev outage must not cost the student a generation."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+
+    def boom(*_a, **_k):
+        raise RuntimeError("jev is down")
+
+    monkeypatch.setattr(app_module, "call_jev_decisions", boom)
+
+    r = _generate(client)
+    assert r.status_code == 200
+    data = r.get_json()
+    assert "bubble_sort" in data["code"]          # content survived intact
+    assert data["quality_gate"]["status"] == "unavailable"
+
+
+def test_generate_gate_unavailable_without_server_key(client, capture):
+    data = _generate(client).get_json()
+    assert data["quality_gate"]["enabled"] is False
+    assert data["quality_gate"]["status"] == "unavailable"
+
+
+def test_generate_gate_does_not_alter_content(client, capture, monkeypatch):
+    """A 'needsRegeneration' verdict is advice only — it must not re-run the LLM."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    monkeypatch.setattr(app_module, "call_jev_decisions", lambda *a, **k: {
+        "answers": {
+            "decision": {"type": "choice", "choice": "needsRegeneration", "confidence": 0.99},
+            "needsHumanReview": {"type": "noul", "noul": 0.97},
+        }
+    })
+
+    baseline = len(capture["calls"])
+    data = _generate(client).get_json()
+    assert "bubble_sort" in data["code"]
+    assert data["quality_gate"]["summary"]["needsHumanReview"] is True
+    # exactly one LLM call — the gate did not trigger a regeneration
+    assert len(capture["calls"]) - baseline == 1
