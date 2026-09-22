@@ -74,23 +74,6 @@ LLM_PROVIDERS = {
         'api_format': 'openai',
         'requires_key': True,
     },
-    'freemodel_openai': {
-        'label': 'FreeModel OpenAI',
-        'base_url': 'https://api.freemodel.dev/v1',
-        'env_vars': ['FREEMODEL_OPENAI_API_KEY', 'FREEMODEL_API_KEY'],
-        'api_format': 'openai',
-        'requires_key': True,
-    },
-    'freemodel_anthropic': {
-        'label': 'FreeModel Claude',
-        'base_url': 'https://cc.freemodel.dev/v1',
-        'env_vars': ['FREEMODEL_ANTHROPIC_API_KEY', 'FREEMODEL_API_KEY'],
-        'api_format': 'anthropic',
-        'anthropic_version': '2023-06-01',
-        'fallback_model': 'claude-sonnet-4-6',
-        'max_tokens': 4096,
-        'requires_key': True,
-    },
 }
 
 
@@ -267,16 +250,6 @@ def build_provider_attempts(provider, model, provider_config, api_keys):
             'config': groq_config,
             'keys': get_provider_keys(groq_config, ''),
         })
-
-    if provider == 'freemodel_anthropic':
-        fallback_model = provider_config.get('fallback_model', 'claude-sonnet-4-6')
-        if model != fallback_model:
-            attempts.append({
-                'provider': provider,
-                'model': fallback_model,
-                'config': provider_config,
-                'keys': api_keys,
-            })
 
     return attempts
 
