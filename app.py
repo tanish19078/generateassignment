@@ -419,65 +419,184 @@ def validate_generation_result(mode, code, concept):
 
 
 # ==================== OPTIONAL JEV QUALITY GATE ====================
-def run_jev_quality_gate(aim, mode, target_language, result):
-    """Return advisory typed quality signals without changing generated content."""
-    api_key = os.getenv('OPENROUTER_API_KEY', '').strip()
-    if not api_key:
-        return {'enabled': False, 'status': 'unavailable',
-                'reason': 'OPENROUTER_API_KEY is not configured on the server.'}
+# Advisory only. This gate annotates a finished generation with typed review
+# signals from TypeSafe Jev (a structured decision model). It NEVER blocks a
+# response, edits generated content, or triggers a regeneration — and every
+# failure path degrades to a plain 'unavailable' verdict so a Jev outage can
+# never take down /api/generate.
+JEV_ENDPOINT = 'https://openrouter.ai/api/alpha/decisions'
+JEV_MODEL = 'typesafe/jev-1.13'
+JEV_TIMEOUT_SECONDS = 8  # well under the 60s serverless budget
 
-    code = result.get('code', '') or ''
-    concept = result.get('concept', '') or ''
-    output = result.get('output', '') or ''
-    state = {
+JEV_QUESTIONS = {
+    'decision': {
+        'type': 'choice',
+        'instructions': 'Assess readiness for student review using only the supplied state.',
+        'criteria': {
+            'readyForReview': 'Required sections and requested-language checks are present.',
+            'needsRegeneration': 'A required section or requested-language check is missing.',
+            'needsStudentClarification': 'The aim is too underspecified for a useful practical.',
+        },
+    },
+    'primaryConcern': {
+        'type': 'choice',
+        'instructions': 'Choose the main quality concern visible from the state.',
+        'criteria': {
+            'none': 'No concern is visible from the supplied state.',
+            'missingSection': 'Theory, code, or output is missing.',
+            'wrongLanguage': 'The code failed the requested-language check.',
+            'thinContent': 'A required section is present but suspiciously short.',
+            'underspecifiedAim': 'The aim lacks essential implementation detail.',
+        },
+    },
+    'needsHumanReview': {
+        'type': 'noul',
+        'instructions': 'How likely is it that a human should inspect this before export?',
+        'criteria': {
+            'true': 'A material concern or ambiguity is present.',
+            'false': 'The supplied checks show no material concern.',
+        },
+    },
+    'submissionReadiness': {
+        'type': 'score',
+        'instructions': 'Rate how close this experiment is to being submission-ready.',
+        'criteria': [
+            '1 - Major problems; a regeneration is probably needed.',
+            '3 - Usable, but a student should read it before submitting.',
+            '5 - Complete and consistent; no visible concern.',
+        ],
+    },
+}
+
+# Short UI labels per decision. Wording stays advisory — nothing here is an order.
+JEV_DECISION_LABELS = {
+    'readyForReview': 'Looks complete',
+    'needsRegeneration': 'Worth regenerating',
+    'needsStudentClarification': 'Aim is vague',
+}
+
+
+def jev_is_configured():
+    """True when a server-side OpenRouter key is available for the gate."""
+    return bool(os.getenv('OPENROUTER_API_KEY', '').strip())
+
+
+def build_jev_state(aim, mode, target_language, result):
+    """Build the factual state Jev evaluates. Only cheap local checks — no prose."""
+    code = result.get('code') or ''
+    concept = result.get('concept') or ''
+    output = result.get('output') or ''
+    steps = result.get('steps') or []
+
+    return {
         'aim': aim,
         'mode': mode,
         'targetLanguage': target_language or None,
         'checks': {
-            'hasConcept': bool(concept.strip()), 'hasCode': bool(code.strip()),
+            'hasConcept': bool(concept.strip()),
+            'hasCode': bool(code.strip()),
             'hasOutput': bool(output.strip()),
-            'languageValidationPassed': not target_language or validate_code_language(code, target_language),
-            'conceptCharacters': len(concept), 'codeCharacters': len(code),
+            'stepCount': len(steps),
+            'languageValidationPassed': (
+                True if not target_language else validate_code_language(code, target_language)
+            ),
+            'conceptCharacters': len(concept),
+            'codeCharacters': len(code),
             'outputCharacters': len(output),
         },
     }
-    payload = {
-        'model': 'typesafe/jev-1.13', 'state': state,
-        'questions': {
-            'decision': {
-                'type': 'choice', 'instructions': 'Assess readiness for student review using only the supplied state.',
-                'criteria': {
-                    'readyForReview': 'Required sections and requested-language checks are present.',
-                    'needsRegeneration': 'A required section or requested-language check is missing.',
-                    'needsStudentClarification': 'The aim is too underspecified for a useful practical.',
-                },
-            },
-            'primaryConcern': {
-                'type': 'choice', 'instructions': 'Choose the main quality concern visible from the state.',
-                'criteria': {
-                    'none': 'No concern is visible from the supplied state.',
-                    'missingSection': 'Theory, code, or output is missing.',
-                    'wrongLanguage': 'The code failed the requested-language check.',
-                    'underspecifiedAim': 'The aim lacks essential implementation detail.',
-                },
-            },
-            'needsHumanReview': {
-                'type': 'noul', 'instructions': 'How likely is it that a human should inspect this before export?',
-                'criteria': {'true': 'A material concern or ambiguity is present.',
-                             'false': 'The supplied checks show no material concern.'},
-            },
-        },
+
+
+def _normalize_score(answer):
+    """Map a Jev score answer onto 0..1 using its own legend size."""
+    raw = answer.get('score')
+    if not isinstance(raw, (int, float)):
+        return None
+    steps = len(answer.get('legend') or {}) or len(answer.get('probabilities') or {})
+    if steps < 2:
+        return None
+    return max(0.0, min(1.0, raw / (steps - 1)))
+
+
+def summarize_jev_answers(answers):
+    """Flatten Jev's typed answers into the compact advisory shape the UI renders.
+
+    Defensive by construction: anything missing or of an unexpected type is
+    dropped rather than raised on, because this runs on a successful generation.
+    """
+    answers = answers if isinstance(answers, dict) else {}
+
+    def block(key):
+        value = answers.get(key)
+        return value if isinstance(value, dict) else {}
+
+    decision_block = block('decision')
+    concern_block = block('primaryConcern')
+    review_block = block('needsHumanReview')
+    readiness_block = block('submissionReadiness')
+
+    decision = decision_block.get('choice')
+    review_probability = review_block.get('noul')
+    if not isinstance(review_probability, (int, float)):
+        review_probability = None
+
+    summary = {
+        'decision': decision,
+        'decisionLabel': JEV_DECISION_LABELS.get(decision, 'Review suggested'),
+        'decisionConfidence': decision_block.get('confidence'),
+        'primaryConcern': concern_block.get('choice'),
+        'reviewProbability': review_probability,
+        'needsHumanReview': bool(review_probability is not None and review_probability >= 0.5),
+        'readiness': _normalize_score(readiness_block),
     }
+
+    # A clean bill of health only when Jev is positive on both axes.
+    summary['clean'] = bool(decision == 'readyForReview' and not summary['needsHumanReview'])
+    return summary
+
+
+def call_jev_decisions(api_key, state, questions, timeout=JEV_TIMEOUT_SECONDS):
+    """POST one Decisions request and return the decoded body. May raise."""
+    payload = {'model': JEV_MODEL, 'state': state, 'questions': questions}
     request_obj = urllib.request.Request(
-        'https://openrouter.ai/api/alpha/decisions', data=json.dumps(payload).encode('utf-8'),
-        headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}, method='POST',
+        JEV_ENDPOINT,
+        data=json.dumps(payload).encode('utf-8'),
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+            'X-Title': 'PractiGen',
+        },
+        method='POST',
     )
+    with urllib.request.urlopen(request_obj, timeout=timeout) as response:
+        return json.loads(response.read().decode('utf-8'))
+
+
+def run_jev_quality_gate(aim, mode, target_language, result):
+    """Return advisory typed quality signals. Never raises, never mutates `result`.
+
+    Returns a dict that always carries 'enabled' and 'status'. On any failure the
+    status is 'unavailable' and generation continues untouched.
+    """
+    api_key = os.getenv('OPENROUTER_API_KEY', '').strip()
+    if not api_key:
+        return {
+            'enabled': False,
+            'status': 'unavailable',
+            'reason': 'OPENROUTER_API_KEY is not configured on the server.',
+        }
+
     try:
-        with urllib.request.urlopen(request_obj, timeout=15) as response:
-            body = json.loads(response.read().decode('utf-8'))
-        return {'enabled': True, 'status': 'complete', 'answers': body.get('answers', {})}
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError) as err:
-        return {'enabled': True, 'status': 'unavailable', 'reason': str(err)}
+        state = build_jev_state(aim, mode, target_language, result)
+        body = call_jev_decisions(api_key, state, JEV_QUESTIONS)
+        answers = body.get('answers') if isinstance(body, dict) else None
+        summary = summarize_jev_answers(answers)
+        return {'enabled': True, 'status': 'complete', 'summary': summary, 'answers': answers or {}}
+    except Exception as err:  # noqa: BLE001 — advisory gate must never break generation
+        # Deliberately broad: a bad payload, DNS failure, 5xx, timeout or an
+        # unexpected response shape must all read as "no advice available".
+        print(f"Jev quality gate unavailable: {type(err).__name__}: {err}")
+        return {'enabled': True, 'status': 'unavailable', 'reason': f'{type(err).__name__}: {err}'}
 
 
 # ==================== AUTO-DETECT (Phase 3) ====================
@@ -888,8 +1007,15 @@ def api_generate():
                         f"LLM repeatedly produced code in the wrong language (expected {target_language})."
                     )
 
-        if bool(data.get('jev_quality_gate', False)):
-            result['quality_gate'] = run_jev_quality_gate(aim, mode, target_language, result)
+        # Advisory quality gate — on by default, opt out with jev_quality_gate:false.
+        # `result` is already parsed and validated here, so the gate can only add
+        # commentary. The extra try/except is belt-and-braces: even a bug inside
+        # the gate itself must not fail an otherwise good generation.
+        if data.get('jev_quality_gate', True):
+            try:
+                result['quality_gate'] = run_jev_quality_gate(aim, mode, target_language, result)
+            except Exception as gate_error:  # noqa: BLE001 — advisory only
+                print(f"Jev quality gate skipped: {type(gate_error).__name__}: {gate_error}")
 
         return jsonify(result)
     except Exception as e:
