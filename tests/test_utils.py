@@ -204,3 +204,105 @@ def test_build_messages_variation_seed_injected():
 def test_build_messages_no_seed_no_injection():
     msgs = app.build_messages("general", "Sort", "python")
     assert "Variation reference" not in msgs[1]["content"]
+
+
+# --- Jev advisory quality gate ----------------------------------------------
+# Shape below mirrors a real response from POST https://openrouter.ai/api/alpha/decisions
+LIVE_JEV_ANSWERS = {
+    "decision": {
+        "type": "choice",
+        "choice": "needsRegeneration",
+        "probabilities": {"needsRegeneration": 0.98, "readyForReview": 0.02},
+        "confidence": 0.97,
+    },
+    "primaryConcern": {"type": "choice", "choice": "wrongLanguage", "confidence": 0.9},
+    "needsHumanReview": {"type": "noul", "noul": 0.88},
+    "submissionReadiness": {
+        "type": "score",
+        "score": 0.22,
+        "legend": {"0": "1 - Major problems.", "1": "3 - Usable.", "2": "5 - Ready."},
+        "probabilities": {"0": 0.81, "1": 0.16, "2": 0.03},
+        "confidence": 0.67,
+    },
+}
+
+
+def test_summarize_jev_answers_flattens_live_shape():
+    s = app.summarize_jev_answers(LIVE_JEV_ANSWERS)
+    assert s["decision"] == "needsRegeneration"
+    assert s["decisionConfidence"] == 0.97
+    assert s["primaryConcern"] == "wrongLanguage"
+    assert s["reviewProbability"] == 0.88
+    assert s["needsHumanReview"] is True
+    assert s["clean"] is False
+    assert s["decisionLabel"] == "Worth regenerating"
+
+
+def test_summarize_jev_answers_clean_when_ready_and_low_noul():
+    s = app.summarize_jev_answers({
+        "decision": {"type": "choice", "choice": "readyForReview", "confidence": 0.9},
+        "needsHumanReview": {"type": "noul", "noul": 0.07},
+    })
+    assert s["needsHumanReview"] is False
+    assert s["clean"] is True
+
+
+def test_summarize_jev_answers_noul_threshold_is_half():
+    low = app.summarize_jev_answers({"needsHumanReview": {"noul": 0.49}})
+    high = app.summarize_jev_answers({"needsHumanReview": {"noul": 0.5}})
+    assert low["needsHumanReview"] is False
+    assert high["needsHumanReview"] is True
+
+
+@pytest.mark.parametrize("garbage", [None, [], "text", 42, {}, {"decision": "not-a-dict"},
+                                     {"needsHumanReview": {"noul": "high"}}])
+def test_summarize_jev_answers_never_raises(garbage):
+    """A malformed gate response must degrade, not explode — generation already succeeded."""
+    s = app.summarize_jev_answers(garbage)
+    assert s["clean"] is False
+    assert s["needsHumanReview"] is False
+
+
+def test_normalize_score_uses_legend_size():
+    # score 0.22 across a 3-point legend -> 0.11 on a 0..1 scale
+    assert app._normalize_score(LIVE_JEV_ANSWERS["submissionReadiness"]) == pytest.approx(0.11)
+
+
+def test_normalize_score_missing_or_degenerate_returns_none():
+    assert app._normalize_score({"legend": {"0": "a", "1": "b"}}) is None   # no score
+    assert app._normalize_score({"score": 1.0, "legend": {"0": "a"}}) is None  # single point
+
+
+def test_build_jev_state_reports_language_mismatch():
+    result = {"concept": "Theory here", "code": "def f():\n    return 1", "output": "1", "steps": []}
+    state = app.build_jev_state("Write a C program", "general", "c", result)
+    assert state["checks"]["languageValidationPassed"] is False
+    assert state["checks"]["hasConcept"] is True
+    assert state["targetLanguage"] == "c"
+
+
+def test_build_jev_state_counts_os_steps():
+    result = {"concept": "Linux", "code": "", "output": "", "steps": [{"num": 1}, {"num": 2}]}
+    state = app.build_jev_state("Explore ls", "os", "", result)
+    assert state["checks"]["stepCount"] == 2
+    assert state["checks"]["languageValidationPassed"] is True  # no target language to check
+
+
+def test_jev_gate_without_key_is_disabled(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    gate = app.run_jev_quality_gate("aim", "general", "python", {"code": "x", "concept": "y"})
+    assert gate["enabled"] is False
+    assert gate["status"] == "unavailable"
+
+
+def test_jev_gate_swallows_any_transport_error(monkeypatch):
+    """Any exception from the HTTP call must become 'unavailable', never propagate."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("connection reset")
+
+    monkeypatch.setattr(app, "call_jev_decisions", boom)
+    gate = app.run_jev_quality_gate("aim", "general", "python", {"code": "x", "concept": "y"})
+    assert gate["status"] == "unavailable"
+    assert "connection reset" in gate["reason"]
