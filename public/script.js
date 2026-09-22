@@ -12,7 +12,7 @@ const $$ = (sel) => document.querySelectorAll(sel);
 const state = {
   currentView: 'dashboard',
   currentStep: 0,
-  config: { mode: null, provider: null, apiKey: '', termUser: 'student', termHost: 'ubuntu', codeLang: 'c' },
+  config: { mode: null, provider: null, apiKey: '', termUser: 'student', termHost: 'ubuntu', codeLang: 'c', jevQualityGate: false },
   aimsText: '',
   experiments: [],
   logs: [],
@@ -26,13 +26,45 @@ const state = {
 /* ============================
    DATA
    ============================ */
+// Curated picker. Only first-party inference APIs — Groq and Cerebras.
+// `tag` drives the pill on each card; 'preview' models are evaluation-only
+// upstream and may be withdrawn at short notice.
 const models = [
-  { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B', provider: 'groq', providerLabel: 'Groq', desc: 'Fast inference, strong reasoning' },
-  { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B', provider: 'groq', providerLabel: 'Groq', desc: 'Instant generation' },
-  { id: 'qwen-3-235b-a22b-instruct-2507', name: 'Qwen 235B', provider: 'cerebras', providerLabel: 'Cerebras', desc: 'Extreme speed, large context' },
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'freemodel_openai', providerLabel: 'FreeModel', desc: 'Capable coding model (OpenAI)' },
-  { id: 'claude-sonnet-4-6', name: 'Claude 3.5 Sonnet', provider: 'freemodel_anthropic', providerLabel: 'FreeModel', desc: 'Industry standard for coding (Claude)' },
+  {
+    id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B', provider: 'groq', providerLabel: 'Groq',
+    desc: 'Best all-round quality for code and theory', meta: '131K context', tag: 'Recommended',
+  },
+  {
+    id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B', provider: 'groq', providerLabel: 'Groq',
+    desc: 'Same family, far cheaper — good for big batches', meta: '131K context', tag: 'Fastest',
+  },
+  {
+    id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B', provider: 'groq', providerLabel: 'Groq',
+    desc: 'Dependable general-purpose writer', meta: '131K context',
+  },
+  {
+    id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B', provider: 'groq', providerLabel: 'Groq',
+    desc: 'Lightest option; theory can come out thin', meta: '131K context',
+  },
+  {
+    id: 'qwen/qwen3.8-27b', name: 'Qwen 3.8 27B', provider: 'groq', providerLabel: 'Groq',
+    desc: 'Strong on structured code output', meta: '131K context', tag: 'Preview',
+  },
+  {
+    id: 'minimaxai/minimax-m2.7', name: 'MiniMax M2.7', provider: 'groq', providerLabel: 'Groq',
+    desc: 'Widest context — useful for very long labs', meta: '196K context', tag: 'Preview',
+  },
+  {
+    id: 'gpt-oss-120b', name: 'GPT-OSS 120B', provider: 'cerebras', providerLabel: 'Cerebras',
+    desc: 'Same model, roughly 3000 tokens/sec', meta: '131K context', tag: 'Fastest',
+  },
+  {
+    id: 'qwen-3.8-27b', name: 'Qwen 3.8 27B', provider: 'cerebras', providerLabel: 'Cerebras',
+    desc: 'Quick mid-size model for routine aims', meta: '128K context',
+  },
 ];
+
+const DEFAULT_MODEL_ID = 'openai/gpt-oss-120b';
 
 const sampleAims = `Write a C program to implement FCFS CPU scheduling algorithm
 ---
@@ -345,7 +377,7 @@ function renderRecentSessions() {
 }
 
 function startNewProject() {
-  state.config = { mode: null, provider: null, apiKey: '', termUser: 'student', termHost: 'ubuntu', codeLang: 'c' };
+  state.config = { mode: null, provider: null, apiKey: '', termUser: 'student', termHost: 'ubuntu', codeLang: 'c', jevQualityGate: false };
   state.aimsText = '';
   state.experiments = [];
   state.logs = [];
@@ -371,25 +403,36 @@ function startNewProject() {
    ============================ */
 function initProviders() {
   const grid = document.getElementById('provider-grid');
-  const providerColors = { groq: 'var(--amber)', cerebras: 'var(--info)', freemodel_openai: 'var(--success)', freemodel_anthropic: 'var(--success)' };
-  const providerBgs = { groq: 'var(--amber-dim)', cerebras: 'rgba(45,212,191,0.1)', freemodel_openai: 'rgba(34,197,94,0.1)', freemodel_anthropic: 'rgba(34,197,94,0.1)' };
-  
+  const tagClass = { Recommended: 'tag-rec', Fastest: 'tag-fast', Preview: 'tag-preview' };
+
   grid.innerHTML = models.map(m => `
-    <div class="provider-card" data-model="${m.id}" onclick="selectModelConfig('${m.id}')">
-      <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.3rem;">
+    <div class="provider-card" data-model="${m.id}" data-provider="${m.provider}"
+         role="radio" tabindex="0" aria-checked="false"
+         onclick="selectModelConfig('${m.id}')"
+         onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();selectModelConfig('${m.id}')}">
+      <div class="pcard-top">
         <span class="pname">${m.name}</span>
+        ${m.tag ? `<span class="ptag ${tagClass[m.tag] || ''}">${m.tag}</span>` : ''}
       </div>
-      <span class="badge" style="background:${providerBgs[m.provider] || 'var(--hover)'};color:${providerColors[m.provider] || 'var(--text-sec)'};font-size:0.65rem;padding:0.15rem 0.4rem;">${m.providerLabel}</span>
       <p class="pdesc">${m.desc}</p>
+      <div class="pcard-foot">
+        <span class="pprovider" data-provider="${m.provider}">${m.providerLabel}</span>
+        <span class="pmeta">${m.meta || ''}</span>
+      </div>
     </div>
   `).join('');
 
-  // Setup custom model input logic
+  // A custom model ID overrides the card selection but keeps the chosen provider.
   document.getElementById('customModel').addEventListener('input', (e) => {
     const val = e.target.value.trim();
     if (val) {
-      document.querySelectorAll('.provider-card').forEach(c => c.classList.remove('selected'));
+      document.querySelectorAll('.provider-card').forEach(c => {
+        c.classList.remove('selected');
+        c.setAttribute('aria-checked', 'false');
+      });
       state.config.model = val;
+    } else {
+      selectModelConfig(state.config.modelCardId || DEFAULT_MODEL_ID);
     }
   });
 }
@@ -412,9 +455,12 @@ function selectModelConfig(id) {
   if (!m) return;
   state.config.provider = m.provider;
   state.config.model = m.id;
+  state.config.modelCardId = m.id;
 
   document.querySelectorAll('.provider-card').forEach(c => {
-    c.classList.toggle('selected', c.dataset.model === id);
+    const on = c.dataset.model === id;
+    c.classList.toggle('selected', on);
+    c.setAttribute('aria-checked', String(on));
   });
   document.getElementById('customModel').value = '';
 }
@@ -563,6 +609,7 @@ async function startGeneration() {
   state.config.termUser = document.getElementById('termUser')?.value || 'student';
   state.config.termHost = document.getElementById('termHost')?.value || 'ubuntu';
   state.config.codeLang = document.getElementById('codeLang')?.value || 'c';
+  state.config.jevQualityGate = Boolean(document.getElementById('jevQualityGate')?.checked);
 
   let provider = state.config.provider;
   let model = state.config.model;
@@ -663,7 +710,8 @@ async function generateOne(idx) {
           code_language: state.config.codeLang,
           terminal_user: state.config.termUser,
           terminal_host: state.config.termHost,
-          variation_seed: seed
+          variation_seed: seed,
+          jev_quality_gate: state.config.jevQualityGate
         })
       });
 
@@ -677,10 +725,14 @@ async function generateOne(idx) {
       exp.steps = data.steps || [];
       if (data.code_language) exp.codeLanguage = data.code_language;
       if (data.mode) exp.detectedMode = data.mode;
+      exp.qualityGate = data.quality_gate || null;
       exp.status = 'complete';
       success = true;
 
       addGenLog(`Experiment ${idx + 1} complete`, 'success');
+      if (data.quality_gate?.status === 'complete') {
+        addGenLog(`Jev quality gate: ${data.quality_gate.answers?.decision?.choice || 'review complete'}`, 'info');
+      }
       persistSession();
     } catch (err) {
       addGenLog(`Experiment ${idx + 1} attempt ${attempts} failed: ${err.message}`, 'error');
@@ -748,7 +800,8 @@ async function retryExperiment(idx) {
         code_language: state.config.codeLang,
         terminal_user: state.config.termUser,
         terminal_host: state.config.termHost,
-        variation_seed: seed
+        variation_seed: seed,
+        jev_quality_gate: state.config.jevQualityGate
       })
     });
 
@@ -761,6 +814,7 @@ async function retryExperiment(idx) {
     exp.caption = data.caption || 'Experiment Output';
     exp.steps = data.steps || [];
     if (data.code_language) exp.codeLanguage = data.code_language;
+    exp.qualityGate = data.quality_gate || null;
     exp.status = 'complete';
 
     persistSession();
@@ -1191,7 +1245,7 @@ async function handlePdfImport(e) {
   form.append('file', file);
   form.append('api_key', apiKey);
   form.append('provider', provider || 'groq');
-  form.append('model', model || 'llama-3.3-70b-versatile');
+  form.append('model', model || DEFAULT_MODEL_ID);
 
   try {
     const res = await fetch('/api/extract-aims', { method: 'POST', body: form });
@@ -1408,6 +1462,7 @@ function saveToLocalStorage() {
   localStorage.setItem('practigen_term_user_v5', $('#termUser').value);
   localStorage.setItem('practigen_term_host_v5', $('#termHost').value);
   localStorage.setItem('practigen_custom_model_v5', $('#customModel').value.trim());
+  localStorage.setItem('practigen_jev_quality_gate_v1', String($('#jevQualityGate').checked));
 }
 
 function loadFromLocalStorage() {
@@ -1416,6 +1471,7 @@ function loadFromLocalStorage() {
   $('#termUser').value = localStorage.getItem('practigen_term_user_v5') || 'student';
   $('#termHost').value = localStorage.getItem('practigen_term_host_v5') || 'ubuntu';
   $('#customModel').value = localStorage.getItem('practigen_custom_model_v5') || '';
+  $('#jevQualityGate').checked = localStorage.getItem('practigen_jev_quality_gate_v1') === 'true';
 }
 
 /* ============================
@@ -1492,8 +1548,8 @@ function init() {
   loadFromLocalStorage();
   updateEditorDisplay();
 
-  // Select default provider model (first Groq)
-  selectModelConfig('llama-3.3-70b-versatile');
+  // Select the recommended model by default
+  selectModelConfig(DEFAULT_MODEL_ID);
 
   // Enhancement 3 — offer to restore a previous session if one exists.
   maybeOfferRestore();

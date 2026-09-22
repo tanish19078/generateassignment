@@ -156,12 +156,28 @@ body::before {
 /* === PROVIDER CARD === */
 .provider-card {
   padding: 0.85rem; border: 1px solid var(--border); border-radius: 10px; cursor: pointer;
-  transition: all 0.2s; background: var(--bg);
+  transition: all 0.2s; background: var(--bg); display: flex; flex-direction: column; gap: 0.35rem;
 }
 .provider-card:hover { border-color: var(--border-light); }
 .provider-card.selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim), inset 0 0 0 1px var(--accent); }
+.pcard-top { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
 .provider-card .pname { font-weight: 600; font-size: 0.85rem; }
-.provider-card .pdesc { font-size: 0.72rem; color: var(--muted); margin-top: 0.2rem; }
+.provider-card .pdesc { font-size: 0.72rem; color: var(--muted); line-height: 1.45; flex: 1; }
+.pcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-top: 0.1rem; }
+.pmeta { font-size: 0.65rem; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+.pprovider {
+  font-size: 0.65rem; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase;
+  padding: 0.15rem 0.45rem; border-radius: 5px; background: var(--hover); color: var(--text-sec);
+}
+.pprovider[data-provider="groq"] { background: var(--amber-dim); color: var(--amber); }
+.pprovider[data-provider="cerebras"] { background: rgba(45,212,191,0.12); color: var(--info); }
+.ptag {
+  font-size: 0.6rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  padding: 0.12rem 0.4rem; border-radius: 4px; background: var(--hover); color: var(--muted);
+}
+.ptag.tag-rec { background: var(--accent-dim); color: var(--accent); }
+.ptag.tag-fast { background: rgba(45,212,191,0.12); color: var(--info); }
+.ptag.tag-preview { background: var(--amber-dim); color: var(--amber); }
 
 /* === EDITOR === */
 .editor-window { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }

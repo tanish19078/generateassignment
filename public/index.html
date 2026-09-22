@@ -115,7 +115,6 @@
           <div style="display:flex;justify-content:center;gap:.5rem;margin-bottom:3rem;flex-wrap:wrap">
             <span class="badge badge-amber" style="font-size:.65rem;padding:.15rem .5rem">Groq</span>
             <span class="badge badge-teal" style="font-size:.65rem;padding:.15rem .5rem">Cerebras</span>
-            <span class="badge badge-accent" style="font-size:.65rem;padding:.15rem .5rem">FreeModel</span>
             <span style="color:var(--muted);font-size:.72rem;line-height:1.8"> — switch models anytime</span>
           </div>
 
@@ -170,11 +169,12 @@
 
             
             <div style="margin-bottom:2rem;">
-              <label class="label">LLM Provider</label>
-              <div class="grid-5" id="provider-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.65rem;margin-top:0.5rem;"></div>
+              <label class="label">Model</label>
+              <div class="grid-5" id="provider-grid" role="radiogroup" aria-label="Model"
+                   style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:0.65rem;margin-top:0.5rem;"></div>
               <div style="margin-top:0.75rem;">
                 <input class="input" id="customModel" placeholder="Custom Model ID (optional — overrides selection)">
-                <p class="helper">Leave empty to use the selected provider above.</p>
+                <p class="helper">Runs on the provider of the card you last picked. Leave empty to use the card itself.</p>
               </div>
             </div>
 
@@ -190,6 +190,14 @@
               </div>
               <p class="helper">Leave empty to use system defaults.</p>
             </div>
+
+            <label style="display:flex;align-items:flex-start;gap:.65rem;margin:-.75rem 0 2rem;cursor:pointer;">
+              <input id="jevQualityGate" type="checkbox" style="margin-top:.2rem;accent-color:var(--accent);">
+              <span>
+                <strong style="font-size:.88rem;">Jev quality gate</strong>
+                <span class="helper" style="display:block;margin:0;">Optional advisory review after generation. Requires <code>OPENROUTER_API_KEY</code> on the server; it never blocks or changes your assignment.</span>
+              </span>
+            </label>
 
             
             <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;">
