@@ -2,14 +2,15 @@
 
 Turn a list of experiment aims into a formatted, submission-ready `.docx` practical file. Paste your aims, pick a model, and PractiGen writes the theory, code, and realistic terminal/console output for each one — then bundles everything into a single Word document.
 
-Built for students who keep a practical lab file: OS labs (step-by-step Linux commands with terminal screenshots) and general programming labs (C, C++, Python, Java, JavaScript).
+Built for students who keep a practical lab file: OS labs, general programming labs (C, C++, Python, Java, JavaScript), and Computer Networks labs with personalised topologies, configurations and expected-output figures.
 
 ---
 
 ## Features
 
 - **Aim → document in one flow.** Paste aims separated by `---`, generate, review, download.
-- **Two lab styles.** OS mode produces numbered steps with rendered terminal-output images; coding mode produces a concept, source code, and console output.
+- **Three lab styles.** OS mode produces Linux steps, coding mode produces source and console output, and CN mode generates eight supported network experiments without an API key.
+- **CN personalisation.** Enter name, roll number and optional section. Paste your index or load sample aims. Generate consistent IP plans, device configurations, diagrams, verification panels and a sample-style Word file without a cover page. See [CN mode](docs/computer-networks.md) for supported aims and execution limits.
 - **Auto-detect.** Let PractiGen infer the right mode and language per aim — a mixed batch of "explore `grep`" and "binary search in Java" is classified per experiment.
 - **Language lock.** Choose a language and the output stays in it, even if an aim says otherwise. Generated code is heuristically validated and regenerated once if it comes back in the wrong language.
 - **Plagiarism-safe variation.** Every generation uses a random variation seed, so the same aim produces different variable names, examples, and sample data each time.
@@ -56,7 +57,7 @@ style.css   — dark UI                /api/refine       targeted edit FreeModel
 ### Prerequisites
 
 - Python 3.9+
-- An API key for at least one provider (Groq, Cerebras, or FreeModel), or set the matching environment variable.
+- For OS/coding generation, an inference provider API key or a matching server environment variable. **CN mode does not require an API key.**
 
 ### Local development
 
@@ -101,6 +102,8 @@ pip install pytest pytest-mock
 pytest -q                       # all tests
 pytest tests/test_utils.py -v   # pure helpers (parsing, validation, detection)
 pytest tests/test_api.py -v     # endpoints via the Flask test client
+pytest tests/test_cn.py -v      # CN plans, figures and Word exports
+node tests/test_cn_frontend.cjs # offline frontend controller contracts
 ```
 
 - `tests/test_utils.py` — section parsing, language validation, response validation, OS step parsing, caption helpers, output truncation, auto-detect, and the prompt builder.
@@ -113,6 +116,7 @@ pytest tests/test_api.py -v     # endpoints via the Flask test client
 ```
 .
 ├── app.py              # Flask backend — all API routes and document generation
+├── cn/                 # CN plans, Pillow figures and sample-style Word reports
 ├── public/
 │   ├── index.html      # Single-page UI
 │   ├── script.js       # Frontend state, API calls, rendering
@@ -131,6 +135,8 @@ pytest tests/test_api.py -v     # endpoints via the Flask test client
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
+| `/api/cn/catalog` | GET | List eight supported CN experiment aims |
+| `/api/cn/plan` | POST | Generate a network plan without preview image bytes |
 | `/api/parse` | POST | Split raw aim text into a list by separator |
 | `/api/generate` | POST | Generate one experiment (concept, code/procedure, output, caption) |
 | `/api/refine` | POST | Edit an existing experiment with a targeted change |
@@ -144,6 +150,8 @@ Generation and download accept gzip-compressed request bodies (`X-Content-Encodi
 ---
 
 ## Notes & limits
+
+- CN figures use normal captions for topology/IP settings and **Expected output** captions for unexecuted verification panels. Actual Packet Tracer execution and screenshots require a future runner; this release does not fabricate successful runs.
 
 - Serverless functions cap at 60s (`vercel.json`), so very large batches are guarded server-side: `/api/download` rejects more than 200 output units, and Classroom mode is capped at 12 students per run.
 - Terminal output in the document is an image rendered with Pillow; it falls back to plain text if image generation fails.
