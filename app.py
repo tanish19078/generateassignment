@@ -18,6 +18,9 @@ from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from PIL import Image, ImageDraw, ImageFont
+from cn import CATALOG as CN_CATALOG, build_experiment as build_cn_experiment, identify_experiment as identify_cn_experiment
+from cn.rendering import with_previews as cn_with_previews
+from cn.documents import build_cn_document, add_experiment as add_cn_experiment, canonical_experiment as canonical_cn_experiment
 
 
 app = Flask(__name__, static_folder='public', static_url_path='')
@@ -603,6 +606,9 @@ def detect_mode_and_language(aim):
             detected_lang = lang
             break
 
+    if not detected_lang and identify_cn_experiment(aim_text):
+        return {'mode': 'cn', 'code_language': None}
+
     is_shell = bool(re.search(r'\bshell\s+script\b', aim_text, re.IGNORECASE))
     has_os_cue = bool(_OS_CUES.search(aim_text))
 
@@ -820,6 +826,22 @@ def serve_static(path):
     return send_from_directory('public', path)
 
 
+@app.route('/api/cn/catalog', methods=['GET'])
+def api_cn_catalog():
+    return jsonify({'experiments': [{'id': key, 'title': title, 'aim': aim} for key, title, aim in CN_CATALOG],
+                    'execution': 'expected_output', 'runner_connected': False})
+
+
+@app.route('/api/cn/plan', methods=['POST'])
+def api_cn_plan():
+    try:
+        data = request.get_json() or {}
+        result = build_cn_experiment(data.get('aim', ''), data.get('student'))
+        return jsonify(result)
+    except ValueError as err:
+        return jsonify({'error': str(err)}), 400
+
+
 # ==================== API: Parse Aims ====================
 @app.route('/api/parse', methods=['POST'])
 def api_parse():
@@ -928,6 +950,10 @@ def api_generate():
             if detected['code_language']:
                 target_language = detected['code_language']
 
+        if mode == 'cn':
+            result = build_cn_experiment(aim, data.get('student'))
+            return jsonify(cn_with_previews(result))
+
         if mode in ('general', 'language') and not target_language:
             raise ValueError("Code language is required for General Coding mode.")
 
@@ -991,6 +1017,8 @@ def api_generate():
                 print(f"Jev quality gate skipped: {type(gate_error).__name__}: {gate_error}")
 
         return jsonify(result)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         error_msg = str(e)
         status_code = 500
@@ -1054,6 +1082,9 @@ def api_refine():
         change_request = data.get('change_request', '')
         if not change_request.strip():
             raise ValueError("A change request is required to refine an experiment.")
+
+        if data.get('mode') == 'cn':
+            return jsonify({'error': 'CN recipes use a consistent network plan. Change the aim or student details and regenerate.'}), 400
 
         existing_code = data.get('existing_code', '')
         existing_concept = data.get('existing_concept', '')
@@ -1426,15 +1457,23 @@ def embed_output_image(doc, output_text, caption_text, exp_no, step_no,
             del img_buf
 
 
-def count_output_units(experiments):
+def count_output_units(experiments, mode=None):
     """Total number of terminal images a batch will produce (steps, min 1 per experiment)."""
-    return sum(max(len(exp.get('steps', []) or []), 1) for exp in experiments)
+    total = 0
+    for exp in experiments:
+        if mode == 'cn' or exp.get('mode') == 'cn':
+            total += len(build_cn_experiment(exp.get('aim', ''), exp.get('profile'))['figures'])
+        else:
+            total += max(len(exp.get('steps', []) or []), 1)
+    return total
 
 
 def build_document(experiments, settings, mode):
     """Build a .docx from experiments and return a seeked BytesIO. Reused by
     /api/download and /api/classroom-zip."""
     settings = settings or {}
+    if mode == 'cn' or all(exp.get('mode') == 'cn' for exp in experiments):
+        return build_cn_document(experiments, settings)
     font_name = settings.get('fontName', 'Times New Roman')
     body_size = int(settings.get('bodySize', 12))
     heading_size = int(settings.get('headingSize', 14))
@@ -1450,6 +1489,11 @@ def build_document(experiments, settings, mode):
     doc = Document()
 
     for i, exp in enumerate(experiments, 1):
+        if exp.get('mode') == 'cn':
+            add_cn_experiment(doc, canonical_cn_experiment(exp, settings.get('student')), i, start_new_page=False)
+            if i < len(experiments):
+                doc.add_page_break()
+            continue
         aim = exp.get('aim', 'N/A')
         concept = exp.get('concept', 'No concept description provided.')
         caption = exp.get('caption', 'Terminal Output Preview')
@@ -1549,7 +1593,7 @@ def api_download():
             return jsonify({'error': 'No experiment artifacts found to bundle.'}), 400
 
         # Bug 4 — reject batches that would build too many images at once.
-        total_units = count_output_units(experiments)
+        total_units = count_output_units(experiments, data.get('mode'))
         if total_units > 200:
             return jsonify({
                 'error': f'Too many output units ({total_units}). Split into smaller batches.'
@@ -1567,7 +1611,7 @@ def api_download():
             as_attachment=True,
             download_name=output_filename
         )
-    except DownloadRequestError as e:
+    except (DownloadRequestError, ValueError) as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
         print(f"CRITICAL EXPORT ERROR: {traceback.format_exc()}")
@@ -1591,7 +1635,7 @@ def api_classroom_zip():
         zip_name = (settings or {}).get('zipFilename', 'Classroom_Variations.zip')
 
         # Guard against runaway batches (per-student unit budget shared across the zip).
-        total_units = sum(count_output_units(s.get('experiments', []) or []) for s in students)
+        total_units = sum(count_output_units(s.get('experiments', []) or [], mode) for s in students)
         if total_units > 600:
             return jsonify({
                 'error': f'Too many total output units ({total_units}). Reduce students or experiments.'
@@ -1616,7 +1660,7 @@ def api_classroom_zip():
             as_attachment=True,
             download_name=zip_name,
         )
-    except DownloadRequestError as e:
+    except (DownloadRequestError, ValueError) as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
         print(f"CRITICAL CLASSROOM EXPORT ERROR: {traceback.format_exc()}")
