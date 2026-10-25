@@ -108,7 +108,12 @@ function compactOutputForExport(output, profile) {
 
 // An experiment renders as OS (step-by-step) when the global mode is OS, or when
 // Auto-mode produced steps for it. Keeps mixed batches correct.
+function expIsCn(exp) {
+  return exp.detectedMode === 'cn' || Boolean(exp.cn);
+}
+
 function expIsOs(exp) {
+  if (expIsCn(exp)) return false;
   return state.config.mode === 'os' || (Array.isArray(exp.steps) && exp.steps.length > 0);
 }
 
@@ -119,6 +124,8 @@ function getDownloadExperiments(profile) {
       concept: exp.theory,
       caption: exp.caption || 'Experiment Output'
     };
+
+    if (expIsCn(exp)) return { mode: 'cn', aim: exp.aim, profile: exp.cn.profile };
 
     if (expIsOs(exp)) {
       return {
@@ -142,6 +149,7 @@ function getDownloadExperiments(profile) {
 
 function getExportUnitCount() {
   return state.experiments.filter(e => e.status === 'complete').reduce((count, exp) => {
+    if (expIsCn(exp)) return count + exp.cn.figures.length;
     return count + (expIsOs(exp) ? Math.max((exp.steps || []).length, 1) : 1);
   }, 0);
 }
@@ -226,7 +234,8 @@ function getSettings() {
     captionSize: '10',
     imageWidth: imageWidthInches,
     terminalImgWidth: terminalImgWidthPx,
-    outputFilename: 'Generated_Practical_File.docx'
+    student: state.config.student || {},
+    outputFilename: state.config.mode === 'cn' ? 'Computer_Networks_Practical_File.docx' : 'Generated_Practical_File.docx'
   };
 }
 
@@ -391,8 +400,7 @@ function startNewProject() {
   document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
   document.querySelectorAll('.provider-card').forEach(c => c.classList.remove('selected'));
   document.getElementById('mode-options').style.display = 'none';
-  document.getElementById('os-options').style.display = 'none';
-  document.getElementById('coding-options').style.display = 'none';
+  selectMode(null);
   
   loadFromLocalStorage();
   navigate('setup');
@@ -448,6 +456,10 @@ function selectMode(mode) {
   if (mode === 'auto') {
     opts.style.display = 'block';
   }
+  document.getElementById('cn-options').style.display = mode === 'cn' ? 'block' : 'none';
+  for (const id of ['model-options', 'key-options']) document.getElementById(id).style.display = mode === 'cn' ? 'none' : 'block';
+  document.getElementById('quality-options').style.display = mode === 'cn' ? 'none' : 'flex';
+  if (mode === null) opts.style.display = 'none';
 }
 
 function selectModelConfig(id) {
@@ -489,7 +501,11 @@ function proceedToAims() {
     showToast('warn', 'Please select a generation mode.'); 
     return; 
   }
-  if (!state.config.model && !document.getElementById('customModel').value.trim()) { 
+  if (state.config.mode === 'cn' && !document.getElementById('cnName').value.trim()) {
+    showToast('warn', 'Enter your name to personalise the CN file.');
+    return;
+  }
+  if (state.config.mode !== 'cn' && !state.config.model && !document.getElementById('customModel').value.trim()) {
     showToast('warn', 'Please select an LLM provider or enter a custom model ID.'); 
     return; 
   }
@@ -538,6 +554,12 @@ function updateEditorDisplay() {
 }
 
 function parseAims(text) {
+  if (state.config.mode === 'cn' && !text.includes('---')) {
+    // Accept a pasted numbered index as well as one aim per line. Preserve wrapped aim lines.
+    const numbered = text.split(/(?:^|\n)\s*(?:(?:Experiment|Exp\.?)\s*(?:No\.?\s*)?)?\d+[.)\-:]\s*/i).map(s => s.trim()).filter(Boolean);
+    if (numbered.length > 1) return numbered;
+    return text.split('\n').map(s => s.trim()).filter(Boolean);
+  }
   return text.split('---').map(s => s.trim()).filter(s => s.length > 0);
 }
 
@@ -593,7 +615,18 @@ function handleFileImport(e) {
   e.target.value = '';
 }
 
-function loadSamples() {
+async function loadSamples() {
+  if (state.config.mode === 'cn') {
+    try {
+      const res = await fetch('/api/cn/catalog');
+      if (!res.ok) throw new Error('Could not load CN sample aims.');
+      const data = await res.json();
+      aimsEditor.value = data.experiments.map(e => e.aim).join('\n---\n');
+      updateEditorDisplay();
+      showToast('success', 'Eight CN sample aims loaded');
+    } catch (err) { showToast('error', err.message); }
+    return;
+  }
   aimsEditor.value = sampleAims;
   updateEditorDisplay();
   showToast('success', 'Sample aims loaded — 6 experiments detected');
@@ -608,6 +641,7 @@ async function startGeneration() {
 
   state.config.termUser = document.getElementById('termUser')?.value || 'student';
   state.config.termHost = document.getElementById('termHost')?.value || 'ubuntu';
+  state.config.student = { name: $('#cnName').value.trim(), roll: $('#cnRoll').value.trim(), section: $('#cnSection').value.trim() };
   state.config.codeLang = document.getElementById('codeLang')?.value || 'c';
   state.config.jevQualityGate = Boolean(document.getElementById('jevQualityGate')?.checked);
 
@@ -633,13 +667,13 @@ async function startGeneration() {
   document.getElementById('genTerminal').innerHTML = '';
   document.getElementById('reviewBtn').style.display = 'none';
   document.getElementById('genSpinner').style.display = 'block';
-  document.getElementById('genSubtitle').textContent = `Processing your experiments with ${model}...`;
+  document.getElementById('genSubtitle').textContent = state.config.mode === 'cn' ? 'Preparing personalised CN experiments...' : `Processing your experiments with ${model}...`;
 
   navigate('generation');
   renderExpGrid();
 
   addGenLog(`Starting generation for ${aims.length} experiment(s)`, 'info');
-  addGenLog(`Target: ${provider ? provider.toUpperCase() : 'CUSTOM'} / ${model.toUpperCase()}`, 'info');
+  addGenLog(state.config.mode === 'cn' ? 'CN templates: addressing, configurations and figures' : `Target: ${provider ? provider.toUpperCase() : 'CUSTOM'} / ${(model || '').toUpperCase()}`, 'info');
   addGenLog('Concurrency: 3 experiments in parallel', 'info');
   addGenLog('---', 'info');
 
@@ -708,6 +742,7 @@ async function generateOne(idx) {
           mode: autoDetect ? 'auto' : state.config.mode,
           auto_detect: autoDetect,
           code_language: state.config.codeLang,
+          student: state.config.student || {},
           terminal_user: state.config.termUser,
           terminal_host: state.config.termHost,
           variation_seed: seed,
@@ -716,13 +751,17 @@ async function generateOne(idx) {
       });
 
       const data = await response.json();
-      if (data.error) throw new Error(data.error);
+      if (data.error) {
+        if (response.status === 400) attempts = maxAttempts;
+        throw new Error(data.error);
+      }
 
       exp.theory = data.concept || 'No concept description provided.';
       exp.code = data.code || '// No code provided.';
       exp.output = data.output || 'No output.';
       exp.caption = data.caption || 'Experiment Output';
       exp.steps = data.steps || [];
+      exp.cn = data.mode === 'cn' ? data : null;
       if (data.code_language) exp.codeLanguage = data.code_language;
       if (data.mode) exp.detectedMode = data.mode;
       exp.qualityGate = data.quality_gate || null;
@@ -798,6 +837,7 @@ async function retryExperiment(idx) {
         mode: autoDetect ? 'auto' : state.config.mode,
         auto_detect: autoDetect,
         code_language: state.config.codeLang,
+        student: state.config.student || {},
         terminal_user: state.config.termUser,
         terminal_host: state.config.termHost,
         variation_seed: seed,
@@ -813,6 +853,8 @@ async function retryExperiment(idx) {
     exp.output = data.output || 'No output.';
     exp.caption = data.caption || 'Experiment Output';
     exp.steps = data.steps || [];
+    exp.cn = data.mode === 'cn' ? data : null;
+    if (data.mode) exp.detectedMode = data.mode;
     if (data.code_language) exp.codeLanguage = data.code_language;
     exp.qualityGate = data.quality_gate || null;
     exp.status = 'complete';
@@ -886,6 +928,31 @@ function scrollTerminalToBottom(id) {
 /* ============================
    REVIEW
    ============================ */
+function renderCnReview(exp, index) {
+  const cn = exp.cn;
+  const figures = cn.figures.map(fig => {
+    const source = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(fig.data_url || '') ? fig.data_url : '';
+    return `<figure class="cn-figure"><img src="${source}" alt="${escapeHtml(fig.caption)}" loading="lazy"><figcaption>${escapeHtml(fig.caption)}</figcaption></figure>`;
+  }).join('');
+  const configurations = cn.configurations.map(c => `<details><summary>${escapeHtml(c.device)} configuration</summary><pre class="code-block">${escapeHtml(c.commands.join('\n'))}</pre></details>`).join('');
+  return `<div class="cn-review">
+    <p class="helper">${escapeHtml([cn.profile.name, cn.profile.roll, cn.profile.section].filter(Boolean).join(' | '))}</p>
+    <h4>Requirements</h4><ul>${cn.requirements.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul>
+    <h4>Procedure / Commands</h4><ol>${cn.procedure.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ol>
+    ${configurations}<div class="cn-figures">${figures}</div>
+    <p>${escapeHtml(cn.result)}</p>
+    <button class="btn btn-secondary" onclick="downloadCnPlan(${index})">Download network plan</button>
+  </div>`;
+}
+
+function downloadCnPlan(index) {
+  const exp = state.experiments[index];
+  const plan = { ...exp.cn, figures: exp.cn.figures.map(({ data_url, ...figure }) => figure) };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(plan, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a'); link.href = url; link.download = `CN_Experiment_${index+1}_Plan.json`; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function renderReview() {
   const complete = state.experiments.filter(e => e.status === 'complete');
   document.getElementById('reviewCountBadge').textContent = `${complete.length} experiment${complete.length !== 1 ? 's' : ''} ready`;
@@ -901,7 +968,9 @@ function renderReview() {
     const isOpen = state.expandedExps.has(realIdx);
     
     let stepsHtml = '';
-    if (expIsOs(exp) && exp.steps && exp.steps.length > 0) {
+    if (expIsCn(exp)) {
+      stepsHtml = renderCnReview(exp, realIdx);
+    } else if (expIsOs(exp) && exp.steps && exp.steps.length > 0) {
       stepsHtml = exp.steps.map(step => `
         <div style="margin-bottom:1.25rem;border-left:2px solid var(--accent-border);padding-left:1rem;">
           <p style="font-size:0.85rem;font-weight:600;color:var(--text);margin-bottom:0.4rem;">Step ${step.num}: ${escapeHtml(step.explanation)}</p>
@@ -931,9 +1000,9 @@ function renderReview() {
         <div class="accordion-header" onclick="toggleAccordion(${realIdx})">
           <span style="font-size:0.75rem;font-family:'JetBrains Mono',monospace;color:var(--muted);flex-shrink:0;">EXP-${exp.number}</span>
           <span style="font-size:0.9rem;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:0.5rem;padding-right:0.5rem;">${escapeHtml(exp.aim)}</span>
-          <span class="badge badge-accent" style="flex-shrink:0;margin-right:0.5rem;">${expIsOs(exp) ? 'Linux' : (exp.codeLanguage || state.config.codeLang || 'C').toUpperCase()}</span>
-          <button class="btn btn-ghost" style="padding:0.3rem 0.65rem;font-size:0.78rem;flex-shrink:0;margin-right:0.5rem;" onclick="event.stopPropagation();openRefineModal(${realIdx})">
-            <i class="fas fa-wand-magic-sparkles"></i> REFINE
+          <span class="badge badge-accent" style="flex-shrink:0;margin-right:0.5rem;">${expIsCn(exp) ? 'CN' : expIsOs(exp) ? 'Linux' : (exp.codeLanguage || state.config.codeLang || 'C').toUpperCase()}</span>
+          <button class="btn btn-ghost" style="padding:0.3rem 0.65rem;font-size:0.78rem;flex-shrink:0;margin-right:0.5rem;" onclick="event.stopPropagation();${expIsCn(exp) ? `retryExperiment(${realIdx})` : `openRefineModal(${realIdx})`}">
+            <i class="fas fa-wand-magic-sparkles"></i> ${expIsCn(exp) ? 'REGENERATE' : 'REFINE'}
           </button>
           <i class="fas fa-chevron-down accordion-chevron ${isOpen ? 'open' : ''}" id="chev-${realIdx}"></i>
         </div>
@@ -1018,6 +1087,7 @@ async function applyRefine() {
         model,
         mode: state.config.mode,
         code_language: state.config.codeLang,
+        student: state.config.student || {},
         terminal_user: state.config.termUser,
         terminal_host: state.config.termHost
       })
@@ -1044,6 +1114,7 @@ async function applyRefine() {
    EXPORT
    ============================ */
 function renderExport() {
+  document.getElementById('classroom-panel').style.display = state.experiments.some(expIsCn) ? 'none' : 'block';
   const complete = state.experiments.filter(e => e.status === 'complete');
   document.getElementById('artifactTotal').textContent = `${complete.length} experiment${complete.length !== 1 ? 's' : ''}`;
   const sizeKB = complete.length * 12 + 8;
@@ -1198,7 +1269,13 @@ async function autoDetectAims() {
 
     const dets = data.detections || [];
     const osCount = dets.filter(d => d.mode === 'os').length;
-    const genCount = dets.length - osCount;
+    const cnCount = dets.filter(d => d.mode === 'cn').length;
+    const genCount = dets.length - osCount - cnCount;
+    if (cnCount) {
+      selectMode(cnCount === dets.length ? 'cn' : 'auto');
+      showToast('success', `Detected ${cnCount} CN aim(s). ${cnCount === dets.length ? 'CN mode selected; add student details in Setup.' : 'Using Auto for the mixed batch.'}`);
+      return;
+    }
     const langs = [...new Set(dets.map(d => d.code_language).filter(Boolean))];
 
     // If the batch is mixed, recommend Auto mode (per-experiment detection at generate time).
@@ -1307,6 +1384,7 @@ async function downloadClassroomZip() {
               mode: state.config.mode === 'auto' ? 'auto' : state.config.mode,
               auto_detect: state.config.mode === 'auto',
               code_language: state.config.codeLang,
+              student: state.config.student || {},
               terminal_user: state.config.termUser,
               terminal_host: state.config.termHost,
               variation_seed: seed
@@ -1367,6 +1445,7 @@ function packExperimentForExport(exp, profile) {
     concept: exp.theory,
     caption: exp.caption || 'Experiment Output'
   };
+  if (expIsCn(exp)) return { mode: 'cn', aim: exp.aim, profile: exp.cn.profile };
   if (expIsOs(exp)) {
     return {
       ...base,
@@ -1524,6 +1603,9 @@ function restoreSession() {
   state.config = { ...state.config, ...(saved.config || {}) };
   state.aimsText = saved.aimsText || '';
   state.generationComplete = true;
+  state.config.student ||= state.experiments.find(expIsCn)?.cn.profile || {};
+  for (const [id, key] of [['cnName', 'name'], ['cnRoll', 'roll'], ['cnSection', 'section']]) $('#'+id).value = state.config.student?.[key] || '';
+  selectMode(state.config.mode);
 
   const banner = document.getElementById('restoreBanner');
   if (banner) banner.style.display = 'none';

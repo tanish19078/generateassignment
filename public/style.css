@@ -565,3 +565,16 @@ body::after {
   }
   body::before { animation: none; }
 }
+
+/* Computer Networks: student details and readable figures at every viewport. */
+.cn-student-fields { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; }
+.cn-review h4 { margin:1rem 0 .5rem; }
+.cn-review ul,.cn-review ol { padding-left:1.5rem; line-height:1.7; color:var(--text-sec); }
+.cn-review details { margin:.75rem 0; }
+.cn-review summary { cursor:pointer; padding:.5rem 0; }
+.cn-figures { display:grid; grid-template-columns:1fr; gap:1rem; margin:1rem 0; }
+.cn-figure { margin:0; background:white; border-radius:8px; overflow:hidden; }
+.cn-figure img { display:block; width:100%; height:auto; }
+.cn-figure figcaption { padding:.6rem; text-align:center; color:#263746; font-size:.85rem; }
+.cn-review pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+@media(max-width:600px) { .cn-student-fields { grid-template-columns:1fr; } }

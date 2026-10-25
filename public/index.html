@@ -132,7 +132,7 @@
             
             <div style="margin-bottom:2rem;">
               <label class="label">Generation Mode</label>
-              <div style="display:flex;gap:1rem;margin-top:0.5rem;">
+              <div style="display:flex;flex-wrap:wrap;gap:1rem;margin-top:0.5rem;">
                 <div class="mode-card" data-mode="os" onclick="selectMode('os')">
                   <i class="fas fa-terminal"></i>
                   <h4>OS Practical</h4>
@@ -142,6 +142,11 @@
                   <i class="fas fa-code"></i>
                   <h4>General Coding</h4>
                   <p>Standard programming with code + output</p>
+                </div>
+                <div class="mode-card" data-mode="cn" onclick="selectMode('cn')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectMode('cn')}">
+                  <i class="fas fa-network-wired"></i>
+                  <h4>Computer Networks</h4>
+                  <p>Aims + student details → diagrams, configurations and Word report</p>
                 </div>
                 <div class="mode-card" data-mode="auto" onclick="selectMode('auto')">
                   <i class="fas fa-wand-magic-sparkles"></i>
@@ -156,6 +161,14 @@
                     <div><label class="label">Hostname</label><input class="input" id="termHost" value="ubuntu" placeholder="e.g. ubuntu"></div>
                   </div>
                 </div>
+                <div id="cn-options" style="display:none;">
+                  <div class="cn-student-fields">
+                    <div><label class="label" for="cnName">Student Name</label><input class="input" id="cnName" maxlength="100" autocomplete="name" placeholder="Your name"></div>
+                    <div><label class="label" for="cnRoll">Roll Number</label><input class="input" id="cnRoll" maxlength="100" placeholder="Your roll number"></div>
+                    <div><label class="label" for="cnSection">Class / Section (optional)</label><input class="input" id="cnSection" maxlength="100" placeholder="e.g. CSE 3A"></div>
+                  </div>
+                  <p class="helper">Eight CN experiment types. No API key needed. Personalised figures and expected outputs are included; real simulator captures are not connected yet.</p>
+                </div>
                 <div id="coding-options" style="display:none;">
                   <label class="label">Code Language</label>
                   <select class="select" id="codeLang">
@@ -168,7 +181,7 @@
             </div>
 
             
-            <div style="margin-bottom:2rem;">
+            <div id="model-options" style="margin-bottom:2rem;">
               <label class="label">Model</label>
               <div class="grid-5" id="provider-grid" role="radiogroup" aria-label="Model"
                    style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:0.65rem;margin-top:0.5rem;"></div>
@@ -179,7 +192,7 @@
             </div>
 
             
-            <div style="margin-bottom:2rem;">
+            <div id="key-options" style="margin-bottom:2rem;">
               <label class="label">API Key</label>
               <div style="position:relative;">
                 <i class="fas fa-lock" style="position:absolute;left:0.85rem;top:50%;transform:translateY(-50%);color:var(--muted);font-size:0.8rem;"></i>
@@ -191,7 +204,7 @@
               <p class="helper">Leave empty to use system defaults.</p>
             </div>
 
-            <label style="display:flex;align-items:flex-start;gap:.65rem;margin:-.75rem 0 2rem;cursor:pointer;">
+            <label id="quality-options" style="display:flex;align-items:flex-start;gap:.65rem;margin:-.75rem 0 2rem;cursor:pointer;">
               <input id="jevQualityGate" type="checkbox" style="margin-top:.2rem;accent-color:var(--accent);">
               <span>
                 <strong style="font-size:.88rem;">Jev quality gate</strong>
@@ -388,7 +401,7 @@ Write a C program to simulate Banker's Algorithm for deadlock avoidance"></texta
               </button>
             </div>
             
-            <div style="border:1px solid var(--border);border-radius:10px;padding:1.25rem;margin-top:1.5rem;">
+            <div id="classroom-panel" style="border:1px solid var(--border);border-radius:10px;padding:1.25rem;margin-top:1.5rem;">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
                 <span style="font-size:0.85rem;font-weight:600;">Classroom Mode</span>
                 <label style="position:relative;width:40px;height:22px;cursor:pointer;">
