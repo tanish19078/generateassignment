@@ -1,6 +1,6 @@
 # PractiGen
 
-Turn a list of experiment aims into a formatted, submission-ready `.docx` practical file. Paste your aims, pick a model, and PractiGen writes the theory, code, and realistic terminal/console output for each one — then bundles everything into a single Word document.
+Turn experiment aims or verified project context into a formatted, submission-ready `.docx`. PractiGen builds practical files and convention-locked Frontend/DBMS project reports from one browser workflow.
 
 Built for students who keep a practical lab file: OS labs, general programming labs (C, C++, Python, Java, JavaScript), and Computer Networks labs with personalised topologies, configurations and expected-output figures.
 
@@ -11,6 +11,7 @@ Built for students who keep a practical lab file: OS labs, general programming l
 - **Aim → document in one flow.** Paste aims separated by `---`, generate, review, download.
 - **Three lab styles.** OS mode produces Linux steps, coding mode produces source and console output, and CN mode generates eight supported network experiments without an API key.
 - **CN personalisation.** Enter name, roll number and optional section. Paste your index or load sample aims. Generate consistent IP plans, device configurations, diagrams, verification panels and a sample-style Word file without a cover page. See [CN mode](docs/computer-networks.md) for supported aims and execution limits.
+- **Project File context bridge.** Copy a Frontend or DBMS collector prompt into the AI session already working on the project, return its structured JSON, validate the evidence, optionally add screenshots, and export a formatted report. Supplied prose is preserved and only blank sections use an LLM. See [Project File mode](docs/project-files.md).
 - **Auto-detect.** Let PractiGen infer the right mode and language per aim — a mixed batch of "explore `grep`" and "binary search in Java" is classified per experiment.
 - **Language lock.** Choose a language and the output stays in it, even if an aim says otherwise. Generated code is heuristically validated and regenerated once if it comes back in the wrong language.
 - **Plagiarism-safe variation.** Every generation uses a random variation seed, so the same aim produces different variable names, examples, and sample data each time.
@@ -35,11 +36,13 @@ style.css   — dark UI                /api/refine       targeted edit FreeModel
                                      /api/extract-aims syllabus PDF
                                      /api/download     build .docx
                                      /api/classroom-zip per-student ZIP
+                                     /api/project/*    project reports
 ```
 
 - **Frontend** is a dependency-free single-page app (vanilla ES6, no build step). All UI state lives in one `state` object in `script.js`.
 - **Backend** is a single Flask module. LLM requests go through one shared runner (`run_completion`) that handles retries, exponential backoff on rate limits, provider/model fallback, and API-key rotation.
 - **Documents** are assembled with `python-docx`. Terminal/console output is rendered to a PNG with Pillow and embedded as an image, mirroring how a real practical file looks.
+- **Project reports** use the separate `project_file/` domain package for collector prompts, schema validation, hybrid prose completion, verified images, and convention-locked DOCX rendering.
 - **Deployment** targets Vercel serverless (`vercel.json` routes `/api/*` → `app.py`, everything else → `public/`).
 
 ### Request flow
@@ -57,7 +60,7 @@ style.css   — dark UI                /api/refine       targeted edit FreeModel
 ### Prerequisites
 
 - Python 3.9+
-- For OS/coding generation, an inference provider API key or a matching server environment variable. **CN mode does not require an API key.**
+- For OS/coding generation, an inference provider API key or a matching server environment variable. **CN mode does not require an API key.** Project File needs a key only when the returned context leaves report prose blank.
 
 ### Local development
 
@@ -103,7 +106,9 @@ pytest -q                       # all tests
 pytest tests/test_utils.py -v   # pure helpers (parsing, validation, detection)
 pytest tests/test_api.py -v     # endpoints via the Flask test client
 pytest tests/test_cn.py -v      # CN plans, figures and Word exports
+pytest tests/test_project_file.py -v # project prompts, validation and Word reports
 node tests/test_cn_frontend.cjs # offline frontend controller contracts
+node tests/test_project_frontend.cjs # offline Project File UI contracts
 ```
 
 - `tests/test_utils.py` — section parsing, language validation, response validation, OS step parsing, caption helpers, output truncation, auto-detect, and the prompt builder.
@@ -117,6 +122,7 @@ node tests/test_cn_frontend.cjs # offline frontend controller contracts
 .
 ├── app.py              # Flask backend — all API routes and document generation
 ├── cn/                 # CN plans, Pillow figures and sample-style Word reports
+├── project_file/       # Project context schemas, prompts and Word reports
 ├── public/
 │   ├── index.html      # Single-page UI
 │   ├── script.js       # Frontend state, API calls, rendering
@@ -144,6 +150,10 @@ node tests/test_cn_frontend.cjs # offline frontend controller contracts
 | `/api/extract-aims` | POST | Extract aims from an uploaded syllabus PDF (multipart) |
 | `/api/download` | POST | Build and return a `.docx` from generated experiments |
 | `/api/classroom-zip` | POST | Build one `.docx` per student and return a ZIP |
+| `/api/project/prompt/<submode>` | GET | Return a Frontend/DBMS context collector prompt |
+| `/api/project/validate` | POST | Validate and normalize a returned context pack |
+| `/api/project/generate` | POST | Build a hybrid report, filling only blank prose |
+| `/api/project/download` | POST | Revalidate and export a Project File `.docx` |
 
 Generation and download accept gzip-compressed request bodies (`X-Content-Encoding: gzip`) so large batches stay within serverless payload limits.
 
@@ -156,4 +166,5 @@ Generation and download accept gzip-compressed request bodies (`X-Content-Encodi
 - Serverless functions cap at 60s (`vercel.json`), so very large batches are guarded server-side: `/api/download` rejects more than 200 output units, and Classroom mode is capped at 12 students per run.
 - Terminal output in the document is an image rendered with Pillow; it falls back to plain text if image generation fails.
 - Language validation uses lightweight heuristics, not a full parser — it reliably catches gross mismatches (e.g. C returned for a Python request) but isn't a linter.
+- Project File currently supports Frontend and DBMS. Java, the institutional title-page template, and the reference citation style remain pending.
 ```

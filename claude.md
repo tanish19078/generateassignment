@@ -8,6 +8,8 @@ An AI tool that turns a list of experiment aims into a formatted `.docx` practic
 
 CN mode additionally generates eight supported network experiments from deterministic recipes, without an LLM. It derives addresses, CLI, figures and tables from one validated plan and exports the supplied lab-report style without a cover page. See `docs/computer-networks.md` for the execution boundary.
 
+Project File mode is a separate report domain for Frontend and DBMS projects. It gives the user a versioned prompt to run in an existing repository-aware AI session, validates the returned JSON context, preserves supplied report prose, fills only blank prose through the shared LLM runner, and exports a convention-locked Word report. Java and the institutional title-page template are pending. See `docs/project-files.md`.
+
 ## Stack
 
 | Layer | Tech |
@@ -28,6 +30,9 @@ cn/
   experiments.py    # CN catalog, plan validation and deterministic recipes
   rendering.py      # Pillow topology, IP-setting and expected-output figures
   documents.py      # CN report formatting and canonical export rebuild
+project_file/
+  reports.py        # Context schemas, collector prompts and hybrid report assembly
+  documents.py      # Frontend/DBMS report formatting and verified image handling
 public/
   index.html        # SPA markup
   script.js         # State, API calls, rendering
@@ -35,6 +40,7 @@ public/
 tests/
   test_utils.py     # Pure helper unit tests
   test_api.py       # Endpoint tests (mocked LLM)
+  test_project_file.py # Project prompts, validation, hybrid generation and DOCX export
 requirements.txt
 vercel.json
 ```
@@ -52,12 +58,13 @@ Order top to bottom:
 - **`build_messages(mode, aim, lang, user, host, seed)`** — returns `[system, user]`. **All prompt construction goes through here.** Hard rules (output tags, language lock) live in the system message; aim + variation seed in the user message.
 - **`parse_generation_text(text, mode, lang)`** — raw LLM text → result dict (concept/code/output/steps/caption).
 - **`parse_steps(procedure)`** — OS procedure text → step list. Handles `Step N:` and `N.` formats with a single-step fallback.
-- **Routes** — `/api/parse`, `/api/generate`, `/api/refine`, `/api/detect`, `/api/extract-aims`, `/api/download`, `/api/classroom-zip`.
+- **Routes** — `/api/parse`, `/api/generate`, `/api/refine`, `/api/detect`, `/api/extract-aims`, `/api/download`, `/api/classroom-zip`, and `/api/project/*`.
 - **Doc builders** — `set_font`, `add_*_para`, caption helpers, `create_terminal_image` (Pillow → PNG; closes the image), `embed_output_image` (embeds + **always frees the buffer**), `count_output_units`, **`build_document(experiments, settings, mode)` → BytesIO** (shared by download and classroom-zip).
 
 ### Endpoint notes
 
 - **CN routes** — `/api/cn/catalog` lists recipes; `/api/cn/plan` returns a canonical plan without previews. `/api/generate` short-circuits for CN before provider/key resolution. Unsupported aims return 400. CN results contain `mode:"cn"` and `execution.status:"not_run"`.
+- **Project routes** — `/api/project/prompt/<submode>` returns the collector; `/api/project/validate` normalizes context; `/api/project/generate` fills only blank prose; `/api/project/download` revalidates and builds the report. Do not route Project File through the experiment parser or `/api/download`.
 - **`/api/generate`** — normalizes UI `mode:'coding'` → `'general'`; `mode:'auto'` (or `auto_detect:true`) routes through `detect_mode_and_language` per request. After parsing it validates the result, and for language-locked modes re-generates once if the code fails `validate_code_language`.
 - **`/api/refine`** — takes the full existing experiment as context and edits it at low temperature (0.3). Preserves the original `aim` in the response.
 - **`/api/classroom-zip`** — backend does **no LLM work**; the frontend generates per-student variations and posts them, the backend builds one `.docx` per student into a ZIP.
@@ -71,14 +78,16 @@ Order top to bottom:
 - **`expIsOs(exp)`** — an experiment renders OS-style when global mode is OS **or** it has steps (so Auto-mode mixed batches export correctly). Use this, not `state.config.mode === 'os'`, for per-experiment branching.
 - **Session** — `persistSession()` writes to `sessionStorage` after each success and on finish; `maybeOfferRestore`/`restoreSession`/`clearSession` drive the restore banner.
 - **Export** — `getDownloadExperiments`/`getExportUnitCount`/`packExperimentForExport` shape state into the backend schema; `compactOutputForExport` truncates per profile; large payloads are gzipped before POST.
+- **Project File** — `state.projectFile` is separate from aims/experiments. The context bridge loads the collector prompt, validates pasted JSON, stores optional optimized screenshots in memory, and uses dedicated generation/review/export branches. Images are deliberately omitted from session restore.
 - **Phase 3 UI** — `autoDetectAims`, `importSyllabusPdf`/`handlePdfImport`, `downloadClassroomZip` (capped at `CLASSROOM_MAX_STUDENTS = 12`).
 
 ## Conventions
 
-- **Prompts:** only build them in `build_messages` / `build_refine_messages`. Keep hard constraints in the system message.
+- **Prompts:** experiment prompts live in `build_messages` / `build_refine_messages`; Project File prompts live in `project_file/reports.py`. Keep hard constraints in system messages.
 - **LLM calls:** always go through `run_completion`, never call `create_chat_completion` directly from a route.
 - **CN conventions:** extend recipes in `cn/experiments.py`, preserve one source for all addresses, and add validator/endpoint/export tests. Never turn generated expectations into claimed simulator observations. No renderer may fetch arbitrary image URLs. CN edits regenerate the canonical recipe rather than entering the generic LLM refine path.
-- **Documents:** build via `build_document`; embed OS/coding images via `embed_output_image` so buffers are freed (serverless memory is tight).
+- **Project File conventions:** keep schemas and prompts in `project_file/reports.py`; keep Word rules in `project_file/documents.py`. Required facts, SQL, screenshots, execution claims and references must come from validated context. Fallback generation may fill prose only. Never fetch image URLs or execute submitted code/SQL.
+- **Documents:** experiments build via `build_document`; Project File builds via `build_project_document`. Embed OS/coding images via `embed_output_image` so buffers are freed (serverless memory is tight).
 - **Per-experiment mode:** branch on `exp` having steps (`expIsOs` / `bool(steps)`), not the global mode, so Auto/mixed batches work.
 - **Frontend:** no framework, no build — keep it vanilla. Tailwind is a CDN convenience, not required.
 - **Tests:** mock the LLM (`monkeypatch app.create_chat_completion`). Tests must run with no network and no key. Add coverage when you add an endpoint or helper.

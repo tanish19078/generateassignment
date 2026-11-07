@@ -21,6 +21,18 @@ from PIL import Image, ImageDraw, ImageFont
 from cn import CATALOG as CN_CATALOG, build_experiment as build_cn_experiment, identify_experiment as identify_cn_experiment
 from cn.rendering import with_previews as cn_with_previews
 from cn.documents import build_cn_document, add_experiment as add_cn_experiment, canonical_experiment as canonical_cn_experiment
+from project_file import (
+    ProjectContextError,
+    ProjectGenerationError,
+    build_collector_prompt,
+    build_generation_messages as build_project_generation_messages,
+    build_project_document,
+    build_project_report,
+    canonicalize_project_report,
+    get_report_format as get_project_report_format,
+    parse_generated_sections as parse_project_generated_sections,
+    validate_project_context,
+)
 
 
 app = Flask(__name__, static_folder='public', static_url_path='')
@@ -44,7 +56,8 @@ def read_download_payload():
             raise DownloadRequestError('Compressed export payload is too large for this deployment.')
 
         try:
-            body = gzip.decompress(body)
+            with gzip.GzipFile(fileobj=io.BytesIO(body), mode='rb') as compressed:
+                body = compressed.read(MAX_DECOMPRESSED_DOWNLOAD_BYTES + 1)
         except (OSError, EOFError) as err:
             raise DownloadRequestError('Compressed export payload could not be decoded.') from err
     elif encoding not in ('', 'identity'):
@@ -840,6 +853,128 @@ def api_cn_plan():
         return jsonify(result)
     except ValueError as err:
         return jsonify({'error': str(err)}), 400
+
+
+# ==================== API: Project File ====================
+@app.route('/api/project/prompt/<submode>', methods=['GET'])
+def api_project_prompt(submode):
+    try:
+        submode = str(submode or '').strip().lower()
+        return jsonify({
+            'schema_version': 1,
+            'submode': submode,
+            'prompt': build_collector_prompt(submode),
+            'report_format': get_project_report_format(submode),
+        })
+    except ProjectContextError as err:
+        return jsonify({'error': str(err)}), 400
+
+
+@app.route('/api/project/validate', methods=['POST'])
+def api_project_validate():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'A JSON request object is required.'}), 400
+    submode = str(data.get('submode') or '').strip().lower()
+    result = validate_project_context(data.get('context'), submode)
+    return jsonify(result)
+
+
+@app.route('/api/project/generate', methods=['POST'])
+def api_project_generate():
+    try:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            raise ProjectContextError('A JSON request object is required.')
+        submode = str(data.get('submode') or '').strip().lower()
+        validation = validate_project_context(data.get('context'), submode)
+        if not validation['valid']:
+            issues = validation['errors'] + validation['missing_fields']
+            return jsonify({
+                'error': 'The project context is incomplete.',
+                **validation,
+            }), 400
+
+        context = validation['normalized']
+        missing = validation['generation_needed']
+        generated = {}
+        if missing:
+            provider = str(data.get('provider') or 'groq').strip().lower()
+            model = str(data.get('model') or 'llama-3.3-70b-versatile').strip()
+            provider_config = LLM_PROVIDERS.get(provider)
+            if not provider_config:
+                raise ProjectContextError(f'Unsupported LLM provider: {provider}')
+            keys = get_provider_keys(provider_config, str(data.get('api_key') or '').strip())
+            if provider_config.get('requires_key') and not keys:
+                env_hint = ' or '.join(provider_config.get('env_vars', []))
+                raise ProjectContextError(
+                    f"{provider_config['label']} API key is required to complete blank report sections. "
+                    f'Enter a key or set {env_hint}.'
+                )
+            messages = build_project_generation_messages(context, missing)
+            text = run_completion(
+                messages, provider, model, provider_config, keys,
+                temperature=0.25, top_p=0.9,
+            )
+            generated = parse_project_generated_sections(text, missing)
+
+        report = build_project_report(context, generated, missing)
+        return jsonify({
+            'report': report,
+            'warnings': validation['warnings'],
+            'generated_sections': missing,
+        })
+    except ProjectContextError as err:
+        return jsonify({'error': str(err)}), 400
+    except ProjectGenerationError as err:
+        return jsonify({'error': str(err)}), 502
+    except Exception as err:
+        error_msg = str(err)
+        status_code = 500
+        if '401' in error_msg or 'authentication' in error_msg.lower():
+            status_code = 401
+        elif '403' in error_msg:
+            status_code = 403
+        elif '429' in error_msg or 'rate limit' in error_msg.lower():
+            status_code = 429
+        return jsonify({'error': error_msg}), status_code
+
+
+def safe_project_filename(value, fallback):
+    name = os.path.basename(str(value or '')).strip()
+    if not name:
+        name = fallback
+    if name.lower().endswith('.docx'):
+        name = name[:-5]
+    name = re.sub(r'[^A-Za-z0-9 _.-]+', '', name).strip(' ._-')
+    name = re.sub(r'[\s.]+', '_', name)[:100] or 'Project_Report'
+    return name + '.docx'
+
+
+@app.route('/api/project/download', methods=['POST'])
+def api_project_download():
+    try:
+        data = read_download_payload()
+        if not isinstance(data, dict):
+            raise ProjectContextError('No project report data was received for export.')
+        submode = str(data.get('submode') or '').strip().lower()
+        report = canonicalize_project_report(data.get('report'), submode)
+        output_filename = safe_project_filename(
+            data.get('output_filename'),
+            f"{report['title']}_{submode}_project_report.docx",
+        )
+        file_buf = build_project_document(report, data.get('images'))
+        return send_file(
+            file_buf,
+            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            as_attachment=True,
+            download_name=output_filename,
+        )
+    except (DownloadRequestError, ProjectContextError, ValueError) as err:
+        return jsonify({'error': str(err)}), 400
+    except Exception as err:
+        print(f"CRITICAL PROJECT EXPORT ERROR: {traceback.format_exc()}")
+        return jsonify({'error': f'Project export failed: {str(err)}'}), 500
 
 
 # ==================== API: Parse Aims ====================

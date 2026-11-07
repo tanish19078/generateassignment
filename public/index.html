@@ -54,12 +54,12 @@
       <div class="step-line" data-line="1"></div>
       <div class="step-item" data-step="2">
         <div class="step-circle"><i class="fas fa-list-check"></i></div>
-        <span class="step-label">Aims</span>
+        <span class="step-label" id="stepDataLabel">Aims</span>
       </div>
       <div class="step-line" data-line="2"></div>
       <div class="step-item" data-step="3">
         <div class="step-circle"><i class="fas fa-microchip"></i></div>
-        <span class="step-label">Generate</span>
+        <span class="step-label" id="stepGenerateLabel">Generate</span>
       </div>
       <div class="step-line" data-line="3"></div>
       <div class="step-item" data-step="4">
@@ -148,6 +148,11 @@
                   <h4>Computer Networks</h4>
                   <p>Aims + student details → diagrams, configurations and Word report</p>
                 </div>
+                <div class="mode-card" data-mode="project" onclick="selectMode('project')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectMode('project')}">
+                  <i class="fas fa-folder-open"></i>
+                  <h4>Project File</h4>
+                  <p>Bridge an existing AI build session into a formatted project report</p>
+                </div>
                 <div class="mode-card" data-mode="auto" onclick="selectMode('auto')">
                   <i class="fas fa-wand-magic-sparkles"></i>
                   <h4>Auto-Detect</h4>
@@ -168,6 +173,21 @@
                     <div><label class="label" for="cnSection">Class / Section (optional)</label><input class="input" id="cnSection" maxlength="100" placeholder="e.g. CSE 3A"></div>
                   </div>
                   <p class="helper">Eight CN experiment types. No API key needed. Personalised figures and expected outputs are included; real simulator captures are not connected yet.</p>
+                </div>
+                <div id="project-options" style="display:none;">
+                  <label class="label">Project Report Type</label>
+                  <div class="project-submode-grid" role="radiogroup" aria-label="Project report type">
+                    <button type="button" class="project-submode-card" data-project-submode="frontend" onclick="selectProjectSubmode('frontend')" role="radio" aria-checked="false">
+                      <i class="fas fa-window-maximize"></i><span>Frontend</span><small>UI architecture, methodology and screenshot-led results</small>
+                    </button>
+                    <button type="button" class="project-submode-card" data-project-submode="dbms" onclick="selectProjectSubmode('dbms')" role="radio" aria-checked="false">
+                      <i class="fas fa-database"></i><span>DBMS</span><small>ERD, schema and implemented SQL use cases</small>
+                    </button>
+                    <button type="button" class="project-submode-card" disabled aria-disabled="true">
+                      <i class="fab fa-java"></i><span>Java</span><small>Awaiting report conventions</small>
+                    </button>
+                  </div>
+                  <p class="helper">The selected model is used only when your existing AI session leaves report prose blank. Verified project facts are always required from the context pack.</p>
                 </div>
                 <div id="coding-options" style="display:none;">
                   <label class="label">Code Language</label>
@@ -213,7 +233,7 @@
             </label>
 
             
-            <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+            <div id="formatting-shell" style="border:1px solid var(--border);border-radius:10px;overflow:hidden;">
               <button onclick="toggleCollapse('formatting-section')" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:0.85rem 1rem;background:var(--bg);border:none;color:var(--text-sec);cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;">
                 <span><i class="fas fa-palette" style="margin-right:0.5rem;color:var(--muted);"></i>Document Formatting</span>
                 <i class="fas fa-chevron-down" style="font-size:0.7rem;transition:transform 0.3s;" id="formatting-chevron"></i>
@@ -236,12 +256,12 @@
             <div class="card" style="margin-bottom:1rem;">
               <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">
                 <span style="width:8px;height:8px;border-radius:50%;background:var(--success);"></span>
-                <span style="font-weight:600;font-size:0.9rem;">Ready to go</span>
+                <span id="setupStatusTitle" style="font-weight:600;font-size:0.9rem;">Ready to go</span>
               </div>
-              <p style="font-size:0.8rem;color:var(--muted);line-height:1.5;">Configure your settings, then proceed to write your experiment aims.</p>
+              <p id="setupStatusText" style="font-size:0.8rem;color:var(--muted);line-height:1.5;">Configure your settings, then proceed to write your experiment aims.</p>
             </div>
-            <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="proceedToAims()">
-              Proceed to Aims <i class="fas fa-arrow-right"></i>
+            <button class="btn btn-primary btn-lg" id="setupProceedBtn" style="width:100%;justify-content:center;" onclick="proceedToAims()">
+              <span id="setupProceedLabel">Proceed to Aims</span> <i class="fas fa-arrow-right"></i>
             </button>
             <div class="card" style="margin-top:1rem;background:var(--amber-dim);border-color:rgba(240,160,48,0.15);">
               <p style="font-size:0.78rem;color:var(--amber);line-height:1.5;">
@@ -255,56 +275,114 @@
 
       
       <section id="view-aims" class="view">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:0.75rem;">
-          <div>
-            <h2 style="font-size:1.4rem;font-weight:700;letter-spacing:-0.02em;">Experiment List</h2>
-            <p style="font-size:0.82rem;color:var(--muted);margin-top:0.2rem;">Write or import your experiment aims, separated by <code style="background:var(--hover);padding:0.1rem 0.35rem;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:0.78rem;">---</code></p>
+        <div id="standard-aims-panel">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:0.75rem;">
+            <div>
+              <h2 style="font-size:1.4rem;font-weight:700;letter-spacing:-0.02em;">Experiment List</h2>
+              <p style="font-size:0.82rem;color:var(--muted);margin-top:0.2rem;">Write or import your experiment aims, separated by <code style="background:var(--hover);padding:0.1rem 0.35rem;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:0.78rem;">---</code></p>
+            </div>
+            <div style="display:flex;gap:0.5rem;">
+              <button class="btn btn-secondary" onclick="importFile()"><i class="fas fa-file-import"></i> Import File</button>
+              <button class="btn btn-secondary" onclick="loadSamples()"><i class="fas fa-flask"></i> Load Samples</button>
+            </div>
           </div>
-          <div style="display:flex;gap:0.5rem;">
-            <button class="btn btn-secondary" onclick="importFile()"><i class="fas fa-file-import"></i> Import File</button>
-            <button class="btn btn-secondary" onclick="loadSamples()"><i class="fas fa-flask"></i> Load Samples</button>
-          </div>
-        </div>
-        <input type="file" id="fileInput" accept=".txt" style="display:none;" onchange="handleFileImport(event)">
+          <input type="file" id="fileInput" accept=".txt" style="display:none;" onchange="handleFileImport(event)">
 
-        <div class="editor-window" id="editorWindow">
-          <div class="editor-chrome">
-            <div class="chrome-dot red"></div>
-            <div class="chrome-dot yellow"></div>
-            <div class="chrome-dot green"></div>
-            <div class="chrome-tab">AIMS_MANIFEST.PGEN</div>
-          </div>
-          <div class="editor-body" id="editorBody">
-            <div class="line-numbers" id="lineNumbers">1</div>
-            <div class="editor-highlight" id="editorHighlight"></div>
-            <textarea id="aimsEditor" spellcheck="false" placeholder="Write a C program to implement FCFS CPU scheduling algorithm
+          <div class="editor-window" id="editorWindow">
+            <div class="editor-chrome">
+              <div class="chrome-dot red"></div>
+              <div class="chrome-dot yellow"></div>
+              <div class="chrome-dot green"></div>
+              <div class="chrome-tab">AIMS_MANIFEST.PGEN</div>
+            </div>
+            <div class="editor-body" id="editorBody">
+              <div class="line-numbers" id="lineNumbers">1</div>
+              <div class="editor-highlight" id="editorHighlight"></div>
+              <textarea id="aimsEditor" spellcheck="false" placeholder="Write a C program to implement FCFS CPU scheduling algorithm
 ---
 Write a C program to implement SJF (Non-preemptive) CPU scheduling algorithm
 ---
 Write a shell script to calculate factorial of a number
 ---
 Write a C program to simulate Banker's Algorithm for deadlock avoidance"></textarea>
+            </div>
+          </div>
+
+          <div style="margin-top:1rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+            <button class="btn btn-ghost" onclick="importSyllabusPdf()">
+              <i class="fas fa-file-pdf" style="color:var(--error);"></i> Syllabus PDF Upload
+            </button>
+            <button class="btn btn-ghost" onclick="autoDetectAims()">
+              <i class="fas fa-wand-magic-sparkles" style="color:var(--accent);"></i> Auto-Detect Mode
+            </button>
+            <input type="file" id="pdfInput" accept=".pdf" style="display:none;" onchange="handlePdfImport(event)">
+            <span class="badge badge-muted" id="aimCountBadge">0 experiments detected</span>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border);flex-wrap:wrap;gap:0.75rem;">
+            <button class="btn btn-secondary" onclick="navigate('setup')"><i class="fas fa-arrow-left"></i> Back to Setup</button>
+            <button class="btn btn-primary btn-lg" id="startGenBtn" onclick="startGeneration()" disabled>
+              Start Generation <i class="fas fa-bolt"></i>
+            </button>
           </div>
         </div>
 
-        
-        <div style="margin-top:1rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
-          <button class="btn btn-ghost" onclick="importSyllabusPdf()">
-            <i class="fas fa-file-pdf" style="color:var(--error);"></i> Syllabus PDF Upload
-          </button>
-          <button class="btn btn-ghost" onclick="autoDetectAims()">
-            <i class="fas fa-wand-magic-sparkles" style="color:var(--accent);"></i> Auto-Detect Mode
-          </button>
-          <input type="file" id="pdfInput" accept=".pdf" style="display:none;" onchange="handlePdfImport(event)">
-          <span class="badge badge-muted" id="aimCountBadge">0 experiments detected</span>
-        </div>
+        <div id="project-file-panel" style="display:none;">
+          <div class="project-bridge-header">
+            <div>
+              <span class="badge badge-accent" id="projectSubmodeBadge">FRONTEND</span>
+              <h2>Build a verified context pack</h2>
+              <p>Run the collector in the AI session that already knows your project, then return its JSON here.</p>
+            </div>
+            <button class="btn btn-secondary" onclick="navigate('setup')"><i class="fas fa-sliders"></i> Change Type</button>
+          </div>
 
-        
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border);flex-wrap:wrap;gap:0.75rem;">
-          <button class="btn btn-secondary" onclick="navigate('setup')"><i class="fas fa-arrow-left"></i> Back to Setup</button>
-          <button class="btn btn-primary btn-lg" id="startGenBtn" onclick="startGeneration()" disabled>
-            Start Generation <i class="fas fa-bolt"></i>
-          </button>
+          <div class="project-bridge-grid">
+            <section class="card project-stage-card">
+              <div class="project-stage-number">1</div>
+              <div class="project-stage-heading">
+                <h3>Send the collector prompt</h3>
+                <p>Paste this into Cursor, Claude, OpenCode, or another repository-aware session.</p>
+              </div>
+              <pre class="project-prompt" id="projectCollectorPrompt">Loading collector prompt...</pre>
+              <button class="btn btn-secondary" id="copyProjectPromptBtn" onclick="copyProjectPrompt()"><i class="fas fa-copy"></i> Copy Prompt</button>
+            </section>
+
+            <section class="card project-stage-card">
+              <div class="project-stage-number">2</div>
+              <div class="project-stage-heading">
+                <h3>Return the JSON context</h3>
+                <p>Paste the agent's complete JSON response or import a <code>.json</code> file.</p>
+              </div>
+              <textarea class="textarea project-context-input" id="projectContextInput" spellcheck="false" placeholder='{"schema_version":1,"submode":"frontend",...}'></textarea>
+              <input type="file" id="projectContextFile" accept=".json,application/json" style="display:none;" onchange="handleProjectContextFile(event)">
+              <div class="project-action-row">
+                <button class="btn btn-secondary" onclick="document.getElementById('projectContextFile').click()"><i class="fas fa-file-import"></i> Import JSON</button>
+                <button class="btn btn-primary" id="validateProjectBtn" onclick="validateProjectContext()"><i class="fas fa-shield-halved"></i> Validate Context</button>
+              </div>
+              <div class="project-validation" id="projectValidationPanel" aria-live="polite">
+                <p id="projectValidationSummary">Validation has not run yet.</p>
+                <div id="projectValidationDetails"></div>
+              </div>
+            </section>
+          </div>
+
+          <section class="card project-screenshot-card">
+            <div>
+              <h3><i class="fas fa-images"></i> Report figures and screenshots</h3>
+              <p>Optional during generation, but required for screenshot-led results. PNG/JPEG files are resized locally and matched by filename from the context pack.</p>
+            </div>
+            <button type="button" class="btn btn-secondary" id="projectImageButton" onclick="document.getElementById('projectImageInput').click()"><i class="fas fa-upload"></i> Add Images</button>
+            <input type="file" id="projectImageInput" accept="image/png,image/jpeg" multiple style="display:none;" onchange="handleProjectImages(event)">
+            <div id="projectImageList" class="project-image-list"><span class="helper">No images selected.</span></div>
+          </section>
+
+          <div class="project-footer-actions">
+            <button class="btn btn-secondary" onclick="navigate('setup')"><i class="fas fa-arrow-left"></i> Back to Setup</button>
+            <button class="btn btn-primary btn-lg" id="projectGenerateBtn" onclick="startProjectGeneration()" disabled>
+              Build Project Report <i class="fas fa-file-lines"></i>
+            </button>
+          </div>
         </div>
       </section>
 
@@ -314,7 +392,7 @@ Write a C program to simulate Banker's Algorithm for deadlock avoidance"></texta
         <div class="card" style="margin-bottom:1.75rem;padding:1.5rem 1.75rem;">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1rem;">
             <div>
-              <h2 style="font-size:1.3rem;font-weight:700;letter-spacing:-0.02em;display:flex;align-items:center;gap:0.75rem;">
+              <h2 id="generationTitle" style="font-size:1.3rem;font-weight:700;letter-spacing:-0.02em;display:flex;align-items:center;gap:0.75rem;">
                 AI Generation
                 <div class="spinner" id="genSpinner"></div>
               </h2>
@@ -345,7 +423,7 @@ Write a C program to simulate Banker's Algorithm for deadlock avoidance"></texta
 
         
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border);flex-wrap:wrap;gap:0.75rem;">
-          <button class="btn btn-secondary" onclick="stopGeneration()"><i class="fas fa-arrow-left"></i> Modify Aims</button>
+          <button class="btn btn-secondary" onclick="stopGeneration()"><i class="fas fa-arrow-left"></i> <span id="generationBackLabel">Modify Aims</span></button>
           <button class="btn btn-primary btn-lg" id="reviewBtn" style="display:none;" onclick="navigate('review')">
             Review Results <i class="fas fa-arrow-right"></i>
           </button>
@@ -356,7 +434,7 @@ Write a C program to simulate Banker's Algorithm for deadlock avoidance"></texta
       <section id="view-review" class="view">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:0.75rem;">
           <div style="display:flex;align-items:center;gap:0.75rem;">
-            <h2 style="font-size:1.4rem;font-weight:700;letter-spacing:-0.02em;">Review Results</h2>
+            <h2 id="reviewTitle" style="font-size:1.4rem;font-weight:700;letter-spacing:-0.02em;">Review Results</h2>
             <span class="badge badge-accent" id="reviewCountBadge">0 experiments ready</span>
           </div>
           <button class="btn btn-primary" onclick="navigate('export')">
@@ -369,13 +447,13 @@ Write a C program to simulate Banker's Algorithm for deadlock avoidance"></texta
       
       <section id="view-export" class="view">
         <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1.5rem;">
-          <h2 style="font-size:1.4rem;font-weight:700;letter-spacing:-0.02em;">Final Document</h2>
+          <h2 id="exportTitle" style="font-size:1.4rem;font-weight:700;letter-spacing:-0.02em;">Final Document</h2>
           <span class="badge badge-accent" style="font-size:0.8rem;padding:0.3rem 0.75rem;">READY</span>
         </div>
         <div class="grid-2" style="display:grid;grid-template-columns:1fr 360px;gap:2rem;align-items:start;">
           
           <div>
-            <h3 style="font-size:0.9rem;font-weight:600;color:var(--text-sec);margin-bottom:0.75rem;">Experiments Included</h3>
+            <h3 id="artifactListTitle" style="font-size:0.9rem;font-weight:600;color:var(--text-sec);margin-bottom:0.75rem;">Experiments Included</h3>
             <div id="artifactList" style="display:flex;flex-direction:column;gap:0.5rem;"></div>
             <div style="margin-top:1rem;padding:0.75rem 1rem;background:var(--bg);border-radius:8px;border:1px solid var(--border);display:flex;justify-content:space-between;font-size:0.82rem;color:var(--muted);">
               <span id="artifactTotal">0 experiments</span>
@@ -388,6 +466,14 @@ Write a C program to simulate Banker's Algorithm for deadlock avoidance"></texta
               <span style="font-size:0.8rem;font-weight:600;color:var(--text-sec);">Export Log</span>
             </div>
             <div class="terminal" id="exportTerminal" style="margin-bottom:1.5rem;"></div>
+            <div id="projectExportImagePanel" class="project-export-images" style="display:none;">
+              <div>
+                <strong>Required screenshots</strong>
+                <p id="projectExportImageStatus">No screenshots uploaded.</p>
+              </div>
+              <button type="button" class="btn btn-secondary" id="projectExportImageButton" onclick="document.getElementById('projectImageInput').click()"><i class="fas fa-images"></i> Add Images</button>
+              <div id="projectExportImageList" class="project-image-list"></div>
+            </div>
             <div style="text-align:center;padding:1.5rem 0;" id="downloadArea">
               <button class="download-btn" id="downloadBtn" onclick="downloadDocument()">
                 <i class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT

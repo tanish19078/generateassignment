@@ -6,13 +6,27 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+function createEmptyProjectFileState() {
+  return {
+    rawContext: '',
+    prompt: '',
+    normalized: null,
+    validation: {
+      status: 'idle', errors: [], missingFields: [], warnings: [], generationNeeded: []
+    },
+    report: null,
+    images: [],
+    generationStatus: 'idle'
+  };
+}
+
 /* ============================
    STATE
    ============================ */
 const state = {
   currentView: 'dashboard',
   currentStep: 0,
-  config: { mode: null, provider: null, apiKey: '', termUser: 'student', termHost: 'ubuntu', codeLang: 'c', jevQualityGate: false },
+  config: { mode: null, projectSubmode: null, provider: null, apiKey: '', termUser: 'student', termHost: 'ubuntu', codeLang: 'c', jevQualityGate: false },
   aimsText: '',
   experiments: [],
   logs: [],
@@ -21,6 +35,7 @@ const state = {
   expandedExps: new Set(),
   refiningExp: null,
   genTimeouts: [],
+  projectFile: createEmptyProjectFileState(),
 };
 
 /* ============================
@@ -269,6 +284,7 @@ function navigate(view) {
   updateStepper(step);
 
   // View-specific initializations
+  if (view === 'aims') renderProjectWorkspace();
   if (view === 'review') renderReview();
   if (view === 'export') renderExport();
   if (view === 'generation') scrollTerminalToBottom('genTerminal');
@@ -317,7 +333,12 @@ function showToast(type, message) {
   const icons = { success: 'fa-circle-check', error: 'fa-circle-xmark', info: 'fa-circle-info', warn: 'fa-triangle-exclamation' };
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
-  toast.innerHTML = `<i class="fas ${icons[type] || icons.info}"></i><span>${message}</span>`;
+  const icon = document.createElement('i');
+  icon.className = `fas ${icons[type] || icons.info}`;
+  const text = document.createElement('span');
+  text.textContent = String(message || '');
+  toast.appendChild(icon);
+  toast.appendChild(text);
   container.appendChild(toast);
   setTimeout(() => {
     toast.classList.add('removing');
@@ -351,7 +372,9 @@ function renderRecentSessions() {
   }
 
   const exps = (saved && Array.isArray(saved.experiments)) ? saved.experiments : [];
-  if (exps.length === 0) {
+  const savedProject = saved && saved.config?.mode === 'project' ? saved.projectFile : null;
+  const hasProject = Boolean(savedProject && (savedProject.report || savedProject.normalized || savedProject.rawContext));
+  if (exps.length === 0 && !hasProject) {
     container.innerHTML = `
       <div class="card" style="padding:1.25rem;text-align:center;color:var(--muted);font-size:0.85rem;">
         No recent sessions yet. Start a project — your progress is saved here until you close the tab.
@@ -359,10 +382,13 @@ function renderRecentSessions() {
     return;
   }
 
-  const done = exps.filter(e => e.status === 'complete').length;
+  const done = hasProject ? (savedProject.report ? 1 : 0) : exps.filter(e => e.status === 'complete').length;
   const mode = (saved.config && saved.config.mode) || 'coding';
   const isOs = mode === 'os';
-  const title = exps[0] && exps[0].aim ? exps[0].aim : 'Practical session';
+  const isProject = mode === 'project';
+  const title = isProject
+    ? (savedProject.report?.title || savedProject.normalized?.project?.title || 'Project report')
+    : (exps[0] && exps[0].aim ? exps[0].aim : 'Practical session');
   const when = saved.savedAt
     ? new Date(saved.savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : 'recently';
@@ -371,11 +397,11 @@ function renderRecentSessions() {
     <div class="card" style="padding:1rem 1.25rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.75rem;">
       <div style="display:flex;align-items:center;gap:0.85rem;min-width:0;">
         <div style="width:36px;height:36px;border-radius:8px;background:${isOs ? 'var(--accent-dim)' : 'var(--amber-dim)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-          <i class="fas ${isOs ? 'fa-terminal' : 'fa-code'}" style="font-size:0.8rem;color:${isOs ? 'var(--accent)' : 'var(--amber)'};"></i>
+          <i class="fas ${isProject ? 'fa-folder-open' : isOs ? 'fa-terminal' : 'fa-code'}" style="font-size:0.8rem;color:${isOs || isProject ? 'var(--accent)' : 'var(--amber)'};"></i>
         </div>
         <div style="min-width:0;">
           <p style="font-weight:600;font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;">${escapeHtml(title)}</p>
-          <p style="font-size:0.75rem;color:var(--muted);">${done} experiment${done !== 1 ? 's' : ''} ready &middot; ${when}</p>
+          <p style="font-size:0.75rem;color:var(--muted);">${isProject ? (done ? 'Report ready' : 'Context saved') : `${done} experiment${done !== 1 ? 's' : ''} ready`} &middot; ${when}</p>
         </div>
       </div>
       <div style="display:flex;gap:0.5rem;">
@@ -386,15 +412,20 @@ function renderRecentSessions() {
 }
 
 function startNewProject() {
-  state.config = { mode: null, provider: null, apiKey: '', termUser: 'student', termHost: 'ubuntu', codeLang: 'c', jevQualityGate: false };
+  projectValidationSequence++;
+  projectGenerationSequence++;
+  projectImageSequence++;
+  state.config = { mode: null, projectSubmode: null, provider: null, apiKey: '', termUser: 'student', termHost: 'ubuntu', codeLang: 'c', jevQualityGate: false };
   state.aimsText = '';
   state.experiments = [];
   state.logs = [];
   state.isGenerating = false;
   state.generationComplete = false;
+  state.projectFile = createEmptyProjectFileState();
   state.expandedExps.clear();
   
   document.getElementById('aimsEditor').value = '';
+  document.getElementById('projectContextInput').value = '';
   updateEditorDisplay();
 
   document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
@@ -457,9 +488,45 @@ function selectMode(mode) {
     opts.style.display = 'block';
   }
   document.getElementById('cn-options').style.display = mode === 'cn' ? 'block' : 'none';
+  document.getElementById('project-options').style.display = mode === 'project' ? 'block' : 'none';
   for (const id of ['model-options', 'key-options']) document.getElementById(id).style.display = mode === 'cn' ? 'none' : 'block';
-  document.getElementById('quality-options').style.display = mode === 'cn' ? 'none' : 'flex';
+  document.getElementById('quality-options').style.display = (mode === 'cn' || mode === 'project') ? 'none' : 'flex';
+  document.getElementById('formatting-shell').style.display = mode === 'project' ? 'none' : 'block';
+  const projectMode = mode === 'project';
+  document.getElementById('setupStatusTitle').textContent = projectMode ? 'Context bridge' : 'Ready to go';
+  document.getElementById('setupStatusText').textContent = projectMode
+    ? 'Choose a report type, then collect verified context from the AI session already working on your project.'
+    : 'Configure your settings, then proceed to write your experiment aims.';
+  document.getElementById('setupProceedLabel').textContent = projectMode ? 'Open Context Bridge' : 'Proceed to Aims';
+  document.getElementById('stepDataLabel').textContent = projectMode ? 'Project Data' : 'Aims';
+  document.getElementById('stepGenerateLabel').textContent = projectMode ? 'Build Report' : 'Generate';
+  document.getElementById('standard-aims-panel').style.display = projectMode ? 'none' : 'block';
+  document.getElementById('project-file-panel').style.display = projectMode ? 'block' : 'none';
   if (mode === null) opts.style.display = 'none';
+}
+
+function selectProjectSubmode(submode, preserveContext = false) {
+  if (!['frontend', 'dbms'].includes(submode)) return;
+  const changed = state.config.projectSubmode && state.config.projectSubmode !== submode;
+  if (changed) {
+    projectValidationSequence++;
+    projectGenerationSequence++;
+    projectImageSequence++;
+  }
+  state.config.projectSubmode = submode;
+  document.querySelectorAll('.project-submode-card[data-project-submode]').forEach((card) => {
+    const selected = card.dataset.projectSubmode === submode;
+    card.classList.toggle('selected', selected);
+    card.setAttribute('aria-checked', String(selected));
+  });
+  if (changed && !preserveContext) {
+    state.projectFile = createEmptyProjectFileState();
+    document.getElementById('projectContextInput').value = '';
+  }
+  document.getElementById('projectSubmodeBadge').textContent = submode.toUpperCase();
+  renderProjectValidation();
+  renderProjectImages();
+  loadProjectPrompt();
 }
 
 function selectModelConfig(id) {
@@ -505,6 +572,10 @@ function proceedToAims() {
     showToast('warn', 'Enter your name to personalise the CN file.');
     return;
   }
+  if (state.config.mode === 'project' && !state.config.projectSubmode) {
+    showToast('warn', 'Choose Frontend or DBMS project report type.');
+    return;
+  }
   if (state.config.mode !== 'cn' && !state.config.model && !document.getElementById('customModel').value.trim()) {
     showToast('warn', 'Please select an LLM provider or enter a custom model ID.'); 
     return; 
@@ -512,6 +583,414 @@ function proceedToAims() {
   
   saveToLocalStorage();
   navigate('aims');
+}
+
+/* ============================
+   PROJECT FILE CONTEXT BRIDGE
+   ============================ */
+const PROJECT_MAX_IMAGES = 16;
+const PROJECT_MAX_IMAGE_BYTES = 1_000_000;
+const PROJECT_MAX_TOTAL_IMAGE_BYTES = 2_500_000;
+let projectValidationSequence = 0;
+let projectGenerationSequence = 0;
+let projectImageSequence = 0;
+
+function renderProjectWorkspace() {
+  const projectMode = state.config.mode === 'project';
+  document.getElementById('standard-aims-panel').style.display = projectMode ? 'none' : 'block';
+  document.getElementById('project-file-panel').style.display = projectMode ? 'block' : 'none';
+  if (!projectMode) return;
+
+  const submode = state.config.projectSubmode;
+  document.getElementById('projectSubmodeBadge').textContent = (submode || 'SELECT TYPE').toUpperCase();
+  const input = document.getElementById('projectContextInput');
+  if (input.value !== state.projectFile.rawContext) input.value = state.projectFile.rawContext || '';
+  if (submode && !state.projectFile.prompt) loadProjectPrompt();
+  renderProjectValidation();
+  renderProjectImages();
+}
+
+async function loadProjectPrompt() {
+  const submode = state.config.projectSubmode;
+  const promptNode = document.getElementById('projectCollectorPrompt');
+  if (!submode) {
+    promptNode.textContent = 'Choose Frontend or DBMS in Setup to load its collector prompt.';
+    return;
+  }
+  const requestedSubmode = submode;
+  promptNode.textContent = 'Loading collector prompt...';
+  try {
+    const response = await fetch(`/api/project/prompt/${encodeURIComponent(submode)}`);
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || 'Collector prompt could not be loaded.');
+    if (state.config.projectSubmode !== requestedSubmode) return;
+    state.projectFile.prompt = data.prompt || '';
+    promptNode.textContent = state.projectFile.prompt;
+  } catch (err) {
+    promptNode.textContent = `Collector prompt unavailable: ${err.message}`;
+    showToast('error', 'Could not load the collector prompt.');
+  }
+}
+
+async function copyProjectPrompt() {
+  const prompt = state.projectFile.prompt || document.getElementById('projectCollectorPrompt').textContent;
+  if (!prompt || prompt.startsWith('Loading') || prompt.startsWith('Collector prompt unavailable')) {
+    showToast('warn', 'Wait for the collector prompt to load.');
+    return;
+  }
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(prompt);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = prompt;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      if (!document.execCommand?.('copy')) throw new Error('Clipboard access is unavailable.');
+      textarea.remove();
+    }
+    showToast('success', 'Collector prompt copied.');
+  } catch {
+    showToast('error', 'Clipboard access failed. Select the prompt text and copy it manually.');
+  }
+}
+
+function markProjectContextStale(rawValue) {
+  projectValidationSequence++;
+  projectGenerationSequence++;
+  projectImageSequence++;
+  state.projectFile.rawContext = String(rawValue ?? document.getElementById('projectContextInput').value);
+  state.projectFile.normalized = null;
+  state.projectFile.report = null;
+  state.projectFile.images = [];
+  state.projectFile.generationStatus = 'idle';
+  state.projectFile.validation = {
+    status: 'idle', errors: [], missingFields: [], warnings: [], generationNeeded: []
+  };
+  state.generationComplete = false;
+  renderProjectValidation();
+  renderProjectImages();
+}
+
+function handleProjectContextFile(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith('.json')) {
+    showToast('error', 'Choose a .json context file.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const value = String(reader.result || '');
+    document.getElementById('projectContextInput').value = value;
+    markProjectContextStale(value);
+    showToast('success', `Imported ${file.name}`);
+  };
+  reader.onerror = () => showToast('error', 'The context file could not be read.');
+  reader.readAsText(file);
+}
+
+function renderProjectValidation() {
+  const panel = document.getElementById('projectValidationPanel');
+  const summary = document.getElementById('projectValidationSummary');
+  const details = document.getElementById('projectValidationDetails');
+  const button = document.getElementById('projectGenerateBtn');
+  if (!panel || !summary || !details || !button) return;
+
+  const validation = state.projectFile.validation;
+  panel.className = 'project-validation';
+  document.getElementById('validateProjectBtn').disabled = validation.status === 'validating';
+  button.disabled = validation.status !== 'valid';
+  document.getElementById('projectImageInput').disabled = validation.status !== 'valid';
+  document.getElementById('projectImageButton').disabled = validation.status !== 'valid';
+  document.getElementById('projectExportImageButton').disabled = validation.status !== 'valid';
+  if (validation.status === 'validating') {
+    summary.textContent = 'Validating the context schema and project evidence...';
+    details.innerHTML = '';
+    return;
+  }
+  if (validation.status === 'idle') {
+    summary.textContent = state.projectFile.rawContext
+      ? 'Context changed. Run validation again.'
+      : 'Validation has not run yet.';
+    details.innerHTML = '';
+    return;
+  }
+
+  const errors = [...(validation.errors || []), ...(validation.missingFields || []).map(path => `Missing: ${path}`)];
+  const warnings = validation.warnings || [];
+  if (validation.status === 'valid') {
+    panel.classList.add('valid');
+    summary.innerHTML = '<span class="validation-ok"><i class="fas fa-circle-check"></i> Context is valid and ready.</span>';
+  } else {
+    panel.classList.add('invalid');
+    summary.innerHTML = '<span class="validation-error"><i class="fas fa-circle-xmark"></i> Context needs attention.</span>';
+  }
+  details.innerHTML = [
+    errors.length ? `<ul class="validation-error">${errors.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : '',
+    warnings.length ? `<ul class="validation-warning">${warnings.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : '',
+    validation.generationNeeded?.length
+      ? `<p class="helper">PractiGen will complete: ${escapeHtml(validation.generationNeeded.join(', '))}</p>`
+      : '<p class="helper">All report prose was supplied; no fallback LLM call is required.</p>'
+  ].join('');
+}
+
+async function validateProjectContext() {
+  const submode = state.config.projectSubmode;
+  const rawContext = document.getElementById('projectContextInput').value.trim();
+  if (!submode) {
+    showToast('warn', 'Choose Frontend or DBMS first.');
+    return;
+  }
+  if (!rawContext) {
+    showToast('warn', 'Paste the JSON returned by your existing AI session.');
+    return;
+  }
+
+  state.projectFile.rawContext = rawContext;
+  const requestSequence = ++projectValidationSequence;
+  const requestedSubmode = submode;
+  state.projectFile.validation = {
+    status: 'validating', errors: [], missingFields: [], warnings: [], generationNeeded: []
+  };
+  renderProjectValidation();
+  const validateButton = document.getElementById('validateProjectBtn');
+  validateButton.disabled = true;
+  try {
+    const response = await fetch('/api/project/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ submode, context: rawContext })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (requestSequence !== projectValidationSequence
+        || state.config.projectSubmode !== requestedSubmode
+        || document.getElementById('projectContextInput').value.trim() !== rawContext) return;
+    if (!response.ok) throw new Error(data.error || 'Context validation failed.');
+    state.projectFile.normalized = data.valid ? data.normalized : null;
+    state.projectFile.report = null;
+    state.projectFile.validation = {
+      status: data.valid ? 'valid' : 'invalid',
+      errors: data.errors || [],
+      missingFields: data.missing_fields || [],
+      warnings: data.warnings || [],
+      generationNeeded: data.generation_needed || []
+    };
+    renderProjectValidation();
+    if (data.valid) {
+      persistSession();
+      showToast('success', 'Project context validated.');
+    } else {
+      showToast('warn', 'The context pack is incomplete.');
+    }
+  } catch (err) {
+    if (requestSequence !== projectValidationSequence) return;
+    state.projectFile.normalized = null;
+    state.projectFile.validation = {
+      status: 'invalid', errors: [err.message], missingFields: [], warnings: [], generationNeeded: []
+    };
+    renderProjectValidation();
+    showToast('error', 'Context validation failed.');
+  } finally {
+    if (requestSequence === projectValidationSequence) validateButton.disabled = false;
+  }
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadBrowserImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Image decoding failed.'));
+    image.src = dataUrl;
+  });
+}
+
+async function prepareProjectImage(file) {
+  if (!['image/png', 'image/jpeg'].includes(file.type)) {
+    throw new Error(`${file.name} is not a PNG or JPEG image.`);
+  }
+  if (file.size > 8_000_000) throw new Error(`${file.name} exceeds the 8 MB input limit.`);
+
+  let dataUrl = await readFileAsDataUrl(file);
+  let mediaType = file.type;
+  let bytes = file.size;
+  const image = await loadBrowserImage(dataUrl);
+  const declaredCount = Math.max(getDeclaredProjectImages().size, 1);
+  const targetBytes = Math.min(
+    PROJECT_MAX_IMAGE_BYTES,
+    Math.floor(PROJECT_MAX_TOTAL_IMAGE_BYTES / declaredCount)
+  );
+  if (file.size > targetBytes || image.width > 1600 || image.height > 1200) {
+    const scale = Math.min(1600 / image.width, 1200 / image.height, 1);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    let blob = null;
+    for (const quality of [0.82, 0.7, 0.58]) {
+      blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+      if (blob && blob.size <= targetBytes) break;
+    }
+    if (blob && blob.size > targetBytes) {
+      const shrink = Math.min(Math.sqrt(targetBytes / blob.size) * 0.9, 0.9);
+      const smaller = document.createElement('canvas');
+      smaller.width = Math.max(1, Math.round(canvas.width * shrink));
+      smaller.height = Math.max(1, Math.round(canvas.height * shrink));
+      const smallerContext = smaller.getContext('2d');
+      smallerContext.fillStyle = '#ffffff';
+      smallerContext.fillRect(0, 0, smaller.width, smaller.height);
+      smallerContext.drawImage(canvas, 0, 0, smaller.width, smaller.height);
+      blob = await new Promise(resolve => smaller.toBlob(resolve, 'image/jpeg', 0.7));
+    }
+    if (!blob) throw new Error(`${file.name} could not be optimized.`);
+    dataUrl = await readFileAsDataUrl(blob);
+    mediaType = 'image/jpeg';
+    bytes = blob.size;
+  }
+  if (bytes > targetBytes) {
+    throw new Error(`${file.name} remains larger than its ${Math.round(targetBytes / 1024)} KB report budget after optimization.`);
+  }
+
+  const metadata = getProjectImageMetadata(file.name);
+  if (!metadata) {
+    throw new Error(`${file.name} is not declared in the validated context pack.`);
+  }
+  return {
+    filename: file.name,
+    media_type: mediaType,
+    data_base64: dataUrl.split(',', 2)[1] || '',
+    bytes,
+    caption: metadata.caption || file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '),
+    section: metadata.section || 'results',
+    use_case_id: metadata.use_case_id || ''
+  };
+}
+
+function getProjectImageMetadata(filename) {
+  const normalized = state.projectFile.normalized;
+  const cleanName = String(filename || '').replace(/\\/g, '/').split('/').pop().toLowerCase();
+  if (!normalized) return null;
+  const declared = (normalized.figures || []).find(item => {
+    const itemName = String(item.filename || '').replace(/\\/g, '/').split('/').pop().toLowerCase();
+    return itemName === cleanName;
+  });
+  if (declared) return declared;
+  const result = (normalized.project?.results || []).find(item => {
+    const itemName = String(item.screenshot_filename || '').replace(/\\/g, '/').split('/').pop().toLowerCase();
+    return itemName === cleanName;
+  });
+  if (result) return { caption: result.title, section: 'results', use_case_id: result.id };
+  const useCase = (normalized.dbms?.use_cases || []).find(item => {
+    const itemName = String(item.screenshot_filename || '').replace(/\\/g, '/').split('/').pop().toLowerCase();
+    return itemName === cleanName;
+  });
+  return useCase ? { caption: useCase.title, section: 'use_case', use_case_id: useCase.id } : null;
+}
+
+async function handleProjectImages(event) {
+  const files = Array.from(event.target.files || []);
+  event.target.value = '';
+  if (!files.length) return;
+  const requestSequence = ++projectImageSequence;
+  const contextAtStart = state.projectFile.normalized;
+  if (state.projectFile.images.length + files.length > PROJECT_MAX_IMAGES) {
+    showToast('warn', `A report can contain at most ${PROJECT_MAX_IMAGES} uploaded images.`);
+    return;
+  }
+
+  for (const file of files) {
+    if (state.projectFile.images.some(image => image.filename.toLowerCase() === file.name.toLowerCase())) {
+      showToast('warn', `${file.name} is already selected.`);
+      continue;
+    }
+    try {
+      const prepared = await prepareProjectImage(file);
+      if (requestSequence !== projectImageSequence || state.projectFile.normalized !== contextAtStart) return;
+      const currentBytes = state.projectFile.images.reduce((sum, image) => sum + image.bytes, 0);
+      if (currentBytes + prepared.bytes > PROJECT_MAX_TOTAL_IMAGE_BYTES) {
+        throw new Error('Combined images would exceed the 2.5 MB export limit.');
+      }
+      state.projectFile.images.push(prepared);
+    } catch (err) {
+      if (requestSequence !== projectImageSequence) return;
+      showToast('error', err.message);
+    }
+  }
+  if (requestSequence !== projectImageSequence) return;
+  renderProjectImages();
+}
+
+function removeProjectImage(index) {
+  projectImageSequence++;
+  state.projectFile.images.splice(index, 1);
+  renderProjectImages();
+}
+
+function getDeclaredProjectImages() {
+  const normalized = state.projectFile.normalized || state.projectFile.report?.context;
+  const declarations = new Map();
+  const add = (filename) => {
+    const value = String(filename || '').replace(/\\/g, '/').split('/').pop();
+    if (value) declarations.set(value.toLowerCase(), value);
+  };
+  if (!normalized) return declarations;
+  (normalized.figures || []).forEach(figure => add(figure.filename));
+  if (normalized.submode === 'frontend') {
+    (normalized.project?.results || []).forEach(result => add(result.screenshot_filename));
+  } else {
+    (normalized.dbms?.use_cases || []).forEach(useCase => add(useCase.screenshot_filename));
+  }
+  return declarations;
+}
+
+function getMissingProjectImages() {
+  const uploaded = new Set(state.projectFile.images.map(image => image.filename.toLowerCase()));
+  return [...getDeclaredProjectImages().entries()]
+    .filter(([key]) => !uploaded.has(key))
+    .map(([, filename]) => filename);
+}
+
+function renderProjectExportImageStatus() {
+  const status = document.getElementById('projectExportImageStatus');
+  if (!status) return;
+  const declared = getDeclaredProjectImages();
+  const missing = getMissingProjectImages();
+  status.textContent = missing.length
+    ? `${state.projectFile.images.length} of ${declared.size} uploaded. Missing: ${missing.join(', ')}`
+    : `${state.projectFile.images.length} of ${declared.size} required images uploaded.`;
+  document.getElementById('projectExportImageButton').disabled = state.projectFile.validation.status !== 'valid';
+  if (state.config.mode === 'project') document.getElementById('downloadBtn').disabled = missing.length > 0;
+}
+
+function renderProjectImages() {
+  const containers = [
+    document.getElementById('projectImageList'),
+    document.getElementById('projectExportImageList')
+  ].filter(Boolean);
+  const content = state.projectFile.images.length ? state.projectFile.images.map((image, index) => `
+    <span class="project-image-chip" title="${escapeHtml(image.caption)}">
+      <i class="fas fa-image" style="color:var(--accent)"></i>
+      <span>${escapeHtml(image.filename)} (${Math.round(image.bytes / 1024)} KB)</span>
+      <button type="button" onclick="removeProjectImage(${index})" aria-label="Remove image"><i class="fas fa-xmark"></i></button>
+    </span>`).join('') : '<span class="helper">No images selected.</span>';
+  containers.forEach(container => { container.innerHTML = content; });
+  renderProjectExportImageStatus();
 }
 
 /* ============================
@@ -526,7 +1005,9 @@ function escapeHtml(str) {
   return String(str || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function updateEditorDisplay() {
@@ -636,8 +1117,12 @@ async function loadSamples() {
    GENERATION
    ============================ */
 async function startGeneration() {
+  if (state.config.mode === 'project') return startProjectGeneration();
   const aims = parseAims(state.aimsText);
   if (aims.length === 0) return;
+
+  document.getElementById('generationTitle').innerHTML = 'AI Generation <div class="spinner" id="genSpinner"></div>';
+  document.getElementById('generationBackLabel').textContent = 'Modify Aims';
 
   state.config.termUser = document.getElementById('termUser')?.value || 'student';
   state.config.termHost = document.getElementById('termHost')?.value || 'ubuntu';
@@ -686,6 +1171,101 @@ async function startGeneration() {
   }
 
   finishGeneration();
+}
+
+function renderProjectGenerationCard(status, message) {
+  const statusClass = status === 'complete' ? 'complete' : status === 'failed' ? 'failed' : 'synthesizing';
+  const icon = status === 'complete' ? 'fa-circle-check' : status === 'failed' ? 'fa-circle-xmark' : 'fa-spinner fa-spin';
+  const label = status === 'complete' ? 'REPORT READY' : status === 'failed' ? 'BUILD FAILED' : 'ASSEMBLING REPORT';
+  const title = state.projectFile.normalized?.project?.title || 'Project report';
+  document.getElementById('expGrid').innerHTML = `
+    <div class="exp-card project-generation-card ${statusClass}">
+      <span class="project-gen-kicker"><i class="fas ${icon}"></i> ${label}</span>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(message || '')}</p>
+    </div>`;
+}
+
+async function startProjectGeneration() {
+  if (state.projectFile.validation.status !== 'valid' || !state.projectFile.normalized) {
+    showToast('warn', 'Validate the project context before building the report.');
+    return;
+  }
+  const { provider, model, apiKey } = genContext();
+  const requestSequence = ++projectGenerationSequence;
+  const generatedFields = state.projectFile.validation.generationNeeded || [];
+  state.isGenerating = true;
+  state.generationComplete = false;
+  state.projectFile.generationStatus = 'generating';
+  state.logs = [];
+
+  document.getElementById('generationTitle').innerHTML = 'Project Report Build <div class="spinner" id="genSpinner"></div>';
+  document.getElementById('generationBackLabel').textContent = 'Modify Context';
+  document.getElementById('genTerminal').innerHTML = '';
+  document.getElementById('reviewBtn').style.display = 'none';
+  document.getElementById('genSpinner').style.display = 'block';
+  document.getElementById('genSubtitle').textContent = generatedFields.length
+    ? `Completing ${generatedFields.length} missing section(s), then assembling the report...`
+    : 'All prose supplied. Assembling the validated report...';
+  document.getElementById('genProgress').style.width = '15%';
+  document.getElementById('genPercent').textContent = '15%';
+  document.getElementById('genCount').textContent = '0 of 1';
+  navigate('generation');
+  renderProjectGenerationCard('generating', 'Validating facts and applying the selected report convention.');
+  addGenLog(`Project type: ${state.config.projectSubmode.toUpperCase()}`, 'info');
+  addGenLog('Verified context accepted', 'success');
+  if (generatedFields.length) {
+    addGenLog(`Hybrid completion: ${generatedFields.join(', ')}`, 'info');
+    addGenLog(`Target: ${(provider || 'GROQ').toUpperCase()} / ${(model || DEFAULT_MODEL_ID).toUpperCase()}`, 'info');
+  } else {
+    addGenLog('No fallback LLM call required', 'success');
+  }
+
+  try {
+    const response = await fetch('/api/project/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        submode: state.config.projectSubmode,
+        context: state.projectFile.normalized,
+        provider: provider || 'groq',
+        model: model || DEFAULT_MODEL_ID,
+        api_key: apiKey
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (requestSequence !== projectGenerationSequence) return;
+    if (!response.ok || data.error) throw new Error(data.error || 'Project report generation failed.');
+    if (!state.isGenerating) return;
+
+    state.projectFile.report = data.report;
+    state.projectFile.generationStatus = 'complete';
+    state.generationComplete = true;
+    document.getElementById('genProgress').style.width = '100%';
+    document.getElementById('genPercent').textContent = '100%';
+    document.getElementById('genCount').textContent = '1 of 1';
+    document.getElementById('genSubtitle').textContent = 'Project report assembled successfully.';
+    renderProjectGenerationCard('complete', 'The structured report is ready for review and Word export.');
+    addGenLog('Report sections assembled', 'success');
+    for (const warning of data.warnings || []) addGenLog(warning, 'warn');
+    addGenLog('Project report ready for review', 'success');
+    const reviewButton = document.getElementById('reviewBtn');
+    reviewButton.style.display = 'inline-flex';
+    reviewButton.style.animation = 'fadeSlideIn 0.4s ease';
+    persistSession();
+  } catch (err) {
+    if (requestSequence !== projectGenerationSequence || !state.isGenerating) return;
+    state.projectFile.generationStatus = 'failed';
+    renderProjectGenerationCard('failed', err.message);
+    document.getElementById('genSubtitle').textContent = 'The report could not be assembled.';
+    addGenLog(`Project report failed: ${err.message}`, 'error');
+    showToast('error', 'Project report generation failed.');
+  } finally {
+    if (requestSequence === projectGenerationSequence) {
+      state.isGenerating = false;
+      document.getElementById('genSpinner').style.display = 'none';
+    }
+  }
 }
 
 /**
@@ -806,6 +1386,7 @@ function finishGeneration() {
 }
 
 function stopGeneration() {
+  if (state.config.mode === 'project') projectGenerationSequence++;
   state.isGenerating = false;
   state.genTimeouts.forEach(t => clearTimeout(t));
   state.genTimeouts = [];
@@ -953,7 +1534,74 @@ function downloadCnPlan(index) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function renderProjectReview() {
+  const report = state.projectFile.report;
+  document.getElementById('reviewTitle').textContent = 'Review Project Report';
+  const badge = document.getElementById('reviewCountBadge');
+  const container = document.getElementById('reviewAccordion');
+  if (!report) {
+    badge.textContent = 'REPORT NOT READY';
+    container.innerHTML = '<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">Build the project report before reviewing it.</div>';
+    return;
+  }
+
+  const frontendSections = [
+    ['Abstract', 'abstract'],
+    ['1. Introduction: Background', 'introduction_background'],
+    ['1. Introduction: Significance', 'introduction_significance'],
+    ['2. Problem Definition and Requirements', 'problem_definition'],
+    ['3. Proposed Design / Methodology', 'design_methodology'],
+    ['4. Results', 'results_summary']
+  ];
+  const dbmsSections = [
+    ['1. Introduction', 'introduction'],
+    ['2. E-R Diagram', 'erd_description'],
+    ['3. Database Schema', 'schema_description'],
+    ['4. Use Cases', 'use_cases_introduction']
+  ];
+  const definitions = report.submode === 'frontend' ? frontendSections : dbmsSections;
+  const context = report.context;
+  const source = report.generation?.source || 'supplied';
+  const factSummary = report.submode === 'frontend'
+    ? `${context.frontend.stack.length} technologies · ${context.frontend.pages.length} pages · ${context.project.results.length} results`
+    : `${context.dbms.entities.length} entities · ${context.dbms.tables.length} tables · ${context.dbms.use_cases.length} use cases`;
+  badge.textContent = `${definitions.length} SECTIONS READY`;
+
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:1rem;padding:1rem 1.25rem;">
+      <div style="display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;flex-wrap:wrap;">
+        <div><p style="font-weight:650;">${escapeHtml(report.title)}</p><p class="helper">${escapeHtml(factSummary)}</p></div>
+        <div class="project-review-meta"><span class="badge badge-accent">${escapeHtml(report.submode)}</span><span class="badge badge-muted">${escapeHtml(source)}</span><span class="badge badge-muted">${state.projectFile.images.length} images</span></div>
+      </div>
+    </div>` + definitions.map(([label, key], index) => {
+      const isOpen = state.expandedExps.has(index);
+      return `
+        <div class="accordion-item project-review-section">
+          <button type="button" class="accordion-header project-accordion-button" onclick="toggleProjectSection(${index})" aria-expanded="${isOpen}">
+            <span style="font:0.72rem 'JetBrains Mono',monospace;color:var(--accent);">SEC-${String(index + 1).padStart(2, '0')}</span>
+            <span style="font-size:0.9rem;font-weight:600;flex:1;">${escapeHtml(label)}</span>
+            ${report.generation?.generated_fields?.includes(key) ? '<span class="badge badge-amber">AI completed</span>' : '<span class="badge badge-muted">Supplied</span>'}
+            <i class="fas fa-chevron-down accordion-chevron ${isOpen ? 'open' : ''}"></i>
+          </button>
+          <div class="accordion-body ${isOpen ? 'open' : ''}">
+            <div class="project-review-body"><p>${escapeHtml(report.report_sections[key])}</p></div>
+          </div>
+        </div>`;
+    }).join('');
+}
+
+function toggleProjectSection(index) {
+  if (state.expandedExps.has(index)) state.expandedExps.delete(index);
+  else state.expandedExps.add(index);
+  renderProjectReview();
+}
+
 function renderReview() {
+  if (state.config.mode === 'project') {
+    renderProjectReview();
+    return;
+  }
+  document.getElementById('reviewTitle').textContent = 'Review Results';
   const complete = state.experiments.filter(e => e.status === 'complete');
   document.getElementById('reviewCountBadge').textContent = `${complete.length} experiment${complete.length !== 1 ? 's' : ''} ready`;
 
@@ -1113,7 +1761,64 @@ async function applyRefine() {
 /* ============================
    EXPORT
    ============================ */
+function projectOutputFilename() {
+  const title = state.projectFile.report?.title || `${state.config.projectSubmode || 'Project'} Project Report`;
+  const safe = String(title).replace(/[^A-Za-z0-9 _-]+/g, '').trim().replace(/\s+/g, '_').slice(0, 80);
+  return `${safe || 'Project_Report'}.docx`;
+}
+
+function renderProjectExport() {
+  const report = state.projectFile.report;
+  document.getElementById('classroom-panel').style.display = 'none';
+  document.getElementById('projectExportImagePanel').style.display = 'grid';
+  document.getElementById('exportTitle').textContent = 'Project Report Export';
+  document.getElementById('artifactListTitle').textContent = 'Report Package';
+  document.getElementById('artifactTotal').textContent = report ? '1 project report' : 'Report unavailable';
+  const imageKB = Math.round(state.projectFile.images.reduce((sum, image) => sum + image.bytes, 0) / 1024);
+  document.getElementById('artifactSize').textContent = `~${Math.max(20, imageKB + 20)} KB source assets`;
+  const list = document.getElementById('artifactList');
+  if (!report) {
+    list.innerHTML = '<div class="card" style="color:var(--muted);">Build the report before exporting it.</div>';
+    document.getElementById('downloadBtn').style.display = 'none';
+    return;
+  }
+  const context = report.context;
+  const detail = report.submode === 'frontend'
+    ? `${context.project.results.length} result entries · ${state.projectFile.images.length} screenshots`
+    : `${context.dbms.use_cases.length} SQL use cases · ${state.projectFile.images.length} screenshots`;
+  list.innerHTML = `
+    <div style="display:flex;align-items:center;gap:0.75rem;padding:0.8rem 0.9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
+      <i class="fas fa-file-word" style="color:var(--accent);font-size:1rem;"></i>
+      <div style="min-width:0;flex:1;"><p style="font-size:0.86rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(projectOutputFilename())}</p><p class="helper" style="margin:0;">${escapeHtml(detail)}</p></div>
+      <span class="badge badge-accent">${escapeHtml(report.submode)}</span>
+    </div>`;
+
+  document.getElementById('downloadBtn').style.display = 'flex';
+  document.getElementById('downloadSuccess').style.display = 'none';
+  renderProjectImages();
+  const terminal = document.getElementById('exportTerminal');
+  terminal.innerHTML = '';
+  const messages = [
+    ['Validated context locked', 'success'],
+    ['Times New Roman report styles ready', 'info'],
+    [`${state.projectFile.images.length} uploaded image(s) matched by filename`, 'info'],
+    ['Table of contents and numbered captions enabled', 'info'],
+    ['Word report ready for export', 'success']
+  ];
+  messages.forEach(([message, type], index) => {
+    setTimeout(() => addExportLog(message, type), index * 140);
+  });
+}
+
 function renderExport() {
+  if (state.config.mode === 'project') {
+    renderProjectExport();
+    return;
+  }
+  document.getElementById('exportTitle').textContent = 'Final Document';
+  document.getElementById('artifactListTitle').textContent = 'Experiments Included';
+  document.getElementById('projectExportImagePanel').style.display = 'none';
+  document.getElementById('downloadBtn').disabled = false;
   document.getElementById('classroom-panel').style.display = state.experiments.some(expIsCn) ? 'none' : 'block';
   const complete = state.experiments.filter(e => e.status === 'complete');
   document.getElementById('artifactTotal').textContent = `${complete.length} experiment${complete.length !== 1 ? 's' : ''}`;
@@ -1167,6 +1872,7 @@ function addExportLog(message, type) {
 }
 
 async function downloadDocument() {
+  if (state.config.mode === 'project') return downloadProjectDocument();
   const btn = document.getElementById('downloadBtn');
 
   // Bug 4 — warn before assembling a very large document.
@@ -1230,6 +1936,68 @@ async function downloadDocument() {
     addExportLog(`CRITICAL EXPORT ERROR: ${err.message}`, 'error');
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT';
+  }
+}
+
+async function downloadProjectDocument() {
+  const report = state.projectFile.report;
+  if (!report) {
+    showToast('warn', 'Build the project report before exporting it.');
+    return;
+  }
+  const missingImages = getMissingProjectImages();
+  if (missingImages.length) {
+    showToast('warn', `Add all required screenshots before export (${missingImages.length} missing).`);
+    return;
+  }
+  const button = document.getElementById('downloadBtn');
+  button.disabled = true;
+  button.innerHTML = '<div class="spinner"></div> Building report...';
+  try {
+    const images = state.projectFile.images.map(({ bytes, ...image }) => image);
+    const payload = {
+      submode: state.config.projectSubmode,
+      report,
+      images,
+      output_filename: projectOutputFilename()
+    };
+    const body = JSON.stringify(payload);
+    const downloadPayload = { body, bytes: new Blob([body]).size };
+    const downloadRequest = await getDownloadRequest(downloadPayload);
+    addExportLog(`Project payload prepared (${Math.round(downloadPayload.bytes / 1024)} KB).`, 'info');
+    const response = await fetch('/api/project/download', {
+      method: 'POST', headers: downloadRequest.headers, body: downloadRequest.body
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || 'Project report export was rejected.');
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = projectOutputFilename();
+    document.body.appendChild(link);
+    link.click();
+    window.URL.revokeObjectURL(url);
+    link.remove();
+
+    button.style.display = 'none';
+    document.getElementById('downloadSuccess').style.display = 'block';
+    launchConfetti();
+    addExportLog('Project report exported successfully.', 'success');
+    showToast('success', 'Project report downloaded.');
+    setTimeout(() => {
+      button.disabled = false;
+      button.innerHTML = '<i class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT';
+      button.style.display = 'flex';
+      document.getElementById('downloadSuccess').style.display = 'none';
+    }, 5000);
+  } catch (err) {
+    addExportLog(`PROJECT EXPORT ERROR: ${err.message}`, 'error');
+    showToast('error', `Project export error: ${err.message}`);
+    button.disabled = false;
+    button.innerHTML = '<i class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT';
   }
 }
 
@@ -1561,10 +2329,16 @@ const SESSION_KEY = 'practigen_session_v6';
 
 function persistSession() {
   try {
+    const projectFile = {
+      ...state.projectFile,
+      prompt: '',
+      images: []
+    };
     const payload = {
       experiments: state.experiments,
       config: state.config,
       aimsText: state.aimsText,
+      projectFile,
       savedAt: Date.now()
     };
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(payload));
@@ -1580,13 +2354,20 @@ function maybeOfferRestore() {
   } catch {
     saved = null;
   }
-  if (!saved || !Array.isArray(saved.experiments) || saved.experiments.length === 0) return;
+  const hasExperiments = Boolean(saved && Array.isArray(saved.experiments) && saved.experiments.length > 0);
+  const hasProject = Boolean(
+    saved?.config?.mode === 'project'
+    && saved.projectFile
+    && (saved.projectFile.report || saved.projectFile.normalized || saved.projectFile.rawContext)
+  );
+  if (!hasExperiments && !hasProject) return;
 
-  const done = saved.experiments.filter(e => e.status === 'complete').length;
+  const done = hasProject ? (saved.projectFile.report ? 1 : 0) : saved.experiments.filter(e => e.status === 'complete').length;
   const banner = document.getElementById('restoreBanner');
   if (!banner) return;
-  document.getElementById('restoreText').textContent =
-    `Previous session found — ${done} experiment${done !== 1 ? 's' : ''} ready. Restore?`;
+  document.getElementById('restoreText').textContent = hasProject
+    ? `Previous project context found${done ? ' with a completed report' : ''}. Restore?`
+    : `Previous session found — ${done} experiment${done !== 1 ? 's' : ''} ready. Restore?`;
   banner.style.display = 'flex';
 }
 
@@ -1602,10 +2383,28 @@ function restoreSession() {
   state.experiments = saved.experiments || [];
   state.config = { ...state.config, ...(saved.config || {}) };
   state.aimsText = saved.aimsText || '';
-  state.generationComplete = true;
+  state.projectFile = {
+    ...createEmptyProjectFileState(),
+    ...(saved.projectFile || {}),
+    images: []
+  };
+  state.generationComplete = state.config.mode === 'project'
+    ? Boolean(state.projectFile.report)
+    : true;
+  selectMode(state.config.mode);
+
+  if (state.config.mode === 'project') {
+    if (state.config.projectSubmode) selectProjectSubmode(state.config.projectSubmode, true);
+    document.getElementById('projectContextInput').value = state.projectFile.rawContext || '';
+    const banner = document.getElementById('restoreBanner');
+    if (banner) banner.style.display = 'none';
+    showToast('success', state.projectFile.report ? 'Project report restored. Re-add images before export.' : 'Project context restored.');
+    navigate(state.projectFile.report ? 'review' : 'aims');
+    return;
+  }
+
   state.config.student ||= state.experiments.find(expIsCn)?.cn.profile || {};
   for (const [id, key] of [['cnName', 'name'], ['cnRoll', 'roll'], ['cnSection', 'section']]) $('#'+id).value = state.config.student?.[key] || '';
-  selectMode(state.config.mode);
 
   const banner = document.getElementById('restoreBanner');
   if (banner) banner.style.display = 'none';
@@ -1629,6 +2428,9 @@ function init() {
   initProviders();
   loadFromLocalStorage();
   updateEditorDisplay();
+  document.getElementById('projectContextInput').addEventListener('input', (event) => {
+    markProjectContextStale(event.target.value);
+  });
 
   // Select the recommended model by default
   selectModelConfig(DEFAULT_MODEL_ID);
