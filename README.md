@@ -33,7 +33,9 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open http://localhost:5000. The frontend is vanilla HTML/CSS/JavaScript with no build step. Vercel deployment uses `vercel.json` to serve `public/` and route `/api/*` to Flask.
+Open http://localhost:5000 for the landing page, then choose **Open workspace** to start a file. The dashboard is also available directly at `/workspace.html`; shortcuts such as `/workspace.html?mode=project` select Project, Lab (`lab`) or OS/CN/Custom (`custom`) setup.
+
+The landing page and all workflow screens share coral controls, navy outlines, light backgrounds and consistent typography. The mobile navigation and step bar support the same workflows as desktop. There is no pricing or account requirement. The frontend is vanilla HTML/CSS/JavaScript with no build step. Vercel deployment uses `vercel.json` to serve `public/` and route `/api/*` to Flask.
 
 ## AI configuration
 
@@ -57,7 +59,7 @@ Endpoint settings and keys entered in the UI are stored in that browser's local 
 
 ## Focused checks
 
-All AI and HTTP calls in the tests are mocked. No live provider key is needed.
+The backend and Node tests mock AI and HTTP calls. No live provider key is needed. Choose checks for the behavior changed instead of running every suite for visual or documentation edits.
 
 ```sh
 pip install pytest
@@ -68,6 +70,16 @@ node tests/test_cn_frontend.cjs
 
 The Project tests cover compact import, parsing recovery, section generation, supplied-prose preservation, image validation, and Frontend/DBMS Word exports. Frontend contracts cover three-mode navigation, endpoint persistence, failed-section resume, cancellation, review, download and session restore.
 
+For changes across browser screens, an optional Playwright check exercises the running local app at desktop and mobile sizes. With the app running on port 5000:
+
+```sh
+pip install playwright pytest
+python -m playwright install chromium
+python tests/browser_smoke.py --url http://127.0.0.1:5000 --channel chromium
+```
+
+Use `--channel msedge` for an installed Microsoft Edge browser. This check intercepts AI generation and refinement, while context validation, report assembly, deterministic CN generation and Word downloads use the local backend. It covers navigation, lab refinement, failed Project section resume, image uploads, session restore and responsive overflow. Screenshots and downloaded artifacts go to ignored `.artifacts/browser/`. It does not verify live AI provider availability or execute generated programs.
+
 ## Structure
 
 Contributors and coding agents: read [the agent and contributor guide](docs/AGENTS.md) before editing. It documents implementation contracts, current limits, and when verification is necessary.
@@ -75,7 +87,9 @@ Contributors and coding agents: read [the agent and contributor guide](docs/AGEN
 - `app.py`: Flask API, shared endpoint configuration, OS/coding Word generation.
 - `project_file/`: collector/schema, report assembly, image validation and project Word formatting.
 - `cn/`: deterministic networking plans, figures and Word generation.
-- `public/`: browser UI and workflow controller.
-- `tests/`: offline backend and controller checks.
+- `public/index.html`, `landing.css`, `landing.js`: landing page and interactive file preview.
+- `public/workspace.html`, `workspace.css`, `script.js`: dashboard, setup, generation, review and export workflows.
+- `public/design.css`: shared colors, typography, layout primitives and controls.
+- `tests/`: offline backend/controller checks and optional local browser integration.
 
 Java project reports and an institution-specific title page remain pending; the current project cover uses supplied metadata. Frontend reports retain the existing 10-15 distinct screenshot-result requirement. DBMS reports require declared ERD evidence. All declared images must be attached for final export.

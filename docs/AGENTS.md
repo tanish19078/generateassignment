@@ -33,15 +33,19 @@ CN generation needs no AI key. Complete supplied Project prose also needs no AI 
 | Location | Responsibility |
 | --- | --- |
 | `app.py` | Flask routes, endpoint configuration, lab prompts/parsing, OS/coding Word generation |
-| `public/index.html`, `public/script.js`, `public/style.css` | Vanilla browser UI, shared state, requests and styling; no frontend build step |
+| `public/index.html`, `public/landing.css`, `public/landing.js` | Landing page, responsive navigation and interactive illustrative preview |
+| `public/workspace.html`, `public/workspace.css`, `public/script.js` | Dashboard, three-mode file builder, shared state, requests, review and export |
+| `public/design.css` | Shared light theme, coral/navy colors, typography, responsive controls and layout primitives |
 | `project_file/reports.py` | Project schema version 1, collectors, context validation, prose parsing and report assembly |
 | `project_file/documents.py` | Project Word formatting, validated image decoding and embedding |
 | `cn/experiments.py` | Supported CN catalog, validated plans and deterministic recipes |
 | `cn/rendering.py`, `cn/documents.py` | CN figures, canonical export rebuild and Word formatting |
-| `tests/` | Offline backend tests and Node controller contracts |
+| `tests/` | Offline backend tests, Node controller contracts and optional Playwright integration |
 | `.env.example`, `requirements.txt`, `vercel.json` | Configuration examples, Python dependencies and deployment routing |
 
 The backend uses Flask, Flask-CORS and python-dotenv; documents use python-docx and Pillow. PDF aim extraction imports pypdf lazily. Start locally with `pip install -r requirements.txt` and `python app.py`, then open `http://localhost:5000`.
+
+The homepage is the landing page; its calls to action open `/workspace.html`. Optional `?mode=project`, `?mode=lab` and `?mode=custom` shortcuts open setup without discarding a saved session. There is no frontend build step, pricing screen or account flow. Preserve the same design tokens across landing and workspace. Keep mobile navigation, visible active steps, keyboard-operated review controls and refinement-dialog focus behavior usable. The landing preview is illustrative; do not claim generated code has been executed.
 
 ## Project workflow and contracts
 
@@ -105,7 +109,10 @@ Use pytest with its built-in `monkeypatch` fixture; pytest-mock is not required.
 | Shared parsing, detection or prompt helpers | `python -m pytest -q -p no:cacheprovider tests/test_utils.py` |
 | Project UI, mode selection or session recovery | `node tests/test_project_frontend.cjs` |
 | CN or mixed-file browser behavior | `node tests/test_cn_frontend.cjs` |
-| JavaScript syntax | `node --check public/script.js` |
+| JavaScript syntax | `node --check public/script.js` and `node --check public/landing.js` as applicable |
+| Full frontend redesign or cross-screen interactions | With a local server running: `python tests/browser_smoke.py --url http://127.0.0.1:5000 --channel chromium` |
 | Documentation or final patch hygiene | Check local links and stale references; run `git diff --check` |
 
 Install pytest in an isolated environment when needed. Add regression coverage for meaningful bugs and changed contracts, not tests that merely repeat implementation details. Inspect browser layout or rendered Word output when the change affects them; report tooling blockers honestly. Once appropriate checks pass, repeat them only for further changes, failures or unresolved concerns.
+
+The optional browser check requires Playwright, pytest (for shared fixtures), project dependencies and a browser installed via `python -m playwright install chromium`, or use an installed Edge with `--channel msedge`. It mocks AI generation/refinement and uses the local backend for validation, report assembly, CN recipes and Word downloads. It captures desktop/mobile screenshots, checks overflow and exercises section failure/resume, image requirements and session restore. Outputs belong in ignored `.artifacts/browser/`; do not commit browser downloads or imported design archives. A passing run is not evidence of live provider availability. Review screenshots when appearance changes.
