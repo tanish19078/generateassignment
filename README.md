@@ -70,6 +70,8 @@ The Project tests cover compact import, parsing recovery, section generation, su
 
 ## Structure
 
+Contributors and coding agents: read [the agent and contributor guide](docs/AGENTS.md) before editing. It documents implementation contracts, current limits, and when verification is necessary.
+
 - `app.py`: Flask API, shared endpoint configuration, OS/coding Word generation.
 - `project_file/`: collector/schema, report assembly, image validation and project Word formatting.
 - `cn/`: deterministic networking plans, figures and Word generation.
