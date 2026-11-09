@@ -221,6 +221,7 @@ function getSettings() {
 const viewStepMap = { setup: 1, aims: 2, generation: 3, review: 4, export: 5 };
 
 function navigate(view) {
+  if (!['dashboard', ...Object.keys(viewStepMap)].includes(view)) return;
   // Stop generation if navigating away
   if (state.isGenerating && view !== 'generation') stopGeneration();
 
@@ -245,12 +246,27 @@ function navigate(view) {
   updateStepper(step);
 
   // View-specific initializations
+  if (view === 'dashboard') initDashboard();
   if (view === 'aims') renderProjectWorkspace();
   if (view === 'review') renderReview();
   if (view === 'export') renderExport();
   if (view === 'generation') scrollTerminalToBottom('genTerminal');
 
   closeSidebar();
+  document.title = `${view === 'dashboard' ? 'Workspace' : view.charAt(0).toUpperCase() + view.slice(1)} — PractiGen`;
+  document.getElementById('content').focus?.({ preventScroll: true });
+  window.scrollTo?.({ top: 0, behavior: 'instant' });
+}
+
+function navigateStep(view) {
+  if (view === 'setup') return navigate('setup');
+  if (view === 'aims') return proceedToAims();
+  const ready = state.config.mode === 'project'
+    ? Boolean(state.projectFile.report)
+    : state.experiments.some(exp => exp.status === 'complete');
+  if ((view === 'review' || view === 'export') && ready) return navigate(view);
+  if (view === 'generation' && (state.isGenerating || ready || state.projectFile.generationStatus === 'failed' || state.experiments.length)) return navigate(view);
+  showToast('info', 'Generate your content first. Your next step is available below.');
 }
 
 function navigateToPipeline() {
@@ -267,11 +283,23 @@ function updateStepper(activeStep) {
     el.classList.remove('completed', 'active');
     if (s < activeStep) el.classList.add('completed');
     else if (s === activeStep) el.classList.add('active');
+    if (s === activeStep) el.setAttribute('aria-current', 'step');
+    else el.removeAttribute?.('aria-current');
   });
   document.querySelectorAll('.step-line').forEach(el => {
     const l = parseInt(el.dataset.line);
     el.classList.toggle('completed', l < activeStep);
   });
+  revealActiveStep();
+}
+
+function revealActiveStep() {
+  const stepper = document.getElementById('phase-stepper');
+  const active = document.querySelector('.step-item.active');
+  if (!active || stepper.scrollWidth <= stepper.clientWidth || !stepper.getBoundingClientRect) return;
+  const item = active.getBoundingClientRect();
+  const bounds = stepper.getBoundingClientRect();
+  stepper.scrollLeft += item.left - bounds.left - (stepper.clientWidth - item.width) / 2;
 }
 
 /* ============================
@@ -280,10 +308,19 @@ function updateStepper(activeStep) {
 function openSidebar() {
   document.getElementById('sidebar').classList.add('open');
   document.getElementById('sidebar-overlay').classList.add('open');
+  document.getElementById('workspace-menu').setAttribute('aria-expanded', 'true');
+  document.getElementById('workspace-menu').setAttribute('aria-label', 'Close navigation');
 }
 function closeSidebar() {
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('sidebar-overlay').classList.remove('open');
+  document.getElementById('workspace-menu').setAttribute('aria-expanded', 'false');
+  document.getElementById('workspace-menu').setAttribute('aria-label', 'Open navigation');
+}
+
+function toggleWorkspaceMenu() {
+  if (document.getElementById('sidebar').classList.contains('open')) closeSidebar();
+  else openSidebar();
 }
 
 /* ============================
@@ -337,9 +374,9 @@ function renderRecentSessions() {
   const hasProject = Boolean(savedProject && (savedProject.report || savedProject.normalized || savedProject.rawContext));
   if (exps.length === 0 && !hasProject) {
     container.innerHTML = `
-      <div class="card" style="padding:1.25rem;text-align:center;color:var(--muted);font-size:0.85rem;">
-        No recent sessions yet. Start a project — your progress is saved here until you close the tab.
-      </div>`;
+      <div class="empty-session"><i aria-hidden="true" class="far fa-folder-open"></i><div>
+        <h4>A fresh start.</h4><p>Create your first file above. Your latest session will appear here.</p>
+      </div></div>`;
     return;
   }
 
@@ -354,25 +391,18 @@ function renderRecentSessions() {
     ? new Date(saved.savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : 'recently';
 
+  const progress = isProject
+    ? (done ? 'Report ready' : `${Object.keys(savedProject.completedSections || {}).length} sections saved`)
+    : `${done} of ${exps.length} experiments ready`;
   container.innerHTML = `
-    <div class="card" style="padding:1rem 1.25rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.75rem;">
-      <div style="display:flex;align-items:center;gap:0.85rem;min-width:0;">
-        <div style="width:36px;height:36px;border-radius:8px;background:${isOs ? 'var(--accent-dim)' : 'var(--amber-dim)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-          <i class="fas ${isProject ? 'fa-folder-open' : isOs ? 'fa-terminal' : 'fa-code'}" style="font-size:0.8rem;color:${isOs || isProject ? 'var(--accent)' : 'var(--amber)'};"></i>
-        </div>
-        <div style="min-width:0;">
-          <p style="font-weight:600;font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;">${escapeHtml(title)}</p>
-          <p style="font-size:0.75rem;color:var(--muted);">${isProject ? (done ? 'Report ready' : 'Context saved') : `${done} experiment${done !== 1 ? 's' : ''} ready`} &middot; ${when}</p>
-        </div>
-      </div>
-      <div style="display:flex;gap:0.5rem;">
-        <button class="btn btn-secondary" style="padding:0.4rem 0.85rem;font-size:0.8rem;" onclick="restoreSession()">Resume</button>
-        <button class="btn btn-ghost" style="padding:0.4rem 0.7rem;font-size:0.8rem;" onclick="clearSession();renderRecentSessions();">Clear</button>
-      </div>
+    <div class="session-row">
+      <span class="session-icon"><i aria-hidden="true" class="fas ${isProject ? 'fa-folder-open' : isOs ? 'fa-terminal' : 'fa-code'}"></i></span>
+      <div class="session-info"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(progress)} &middot; ${escapeHtml(when)}</p></div>
+      <div class="action-row"><button class="btn btn-dark" onclick="restoreSession()">Resume <i aria-hidden="true" class="fas fa-arrow-right"></i></button><button class="btn btn-ghost" onclick="clearSession()">Clear</button></div>
     </div>`;
 }
 
-function startNewProject() {
+function startNewProject(mainMode = null) {
   cancelProjectGeneration();
   projectValidationSequence++;
   projectGenerationSequence++;
@@ -395,6 +425,7 @@ function startNewProject() {
   selectMode(null);
   
   loadFromLocalStorage();
+  if (mainMode) selectMainMode(mainMode);
   navigate('setup');
 }
 
@@ -419,6 +450,11 @@ function selectMode(mode) {
   });
   document.getElementById('custom-file-options').style.display = state.config.mainMode === 'custom' ? 'block' : 'none';
   document.getElementById('fileStyle').value = state.config.customStyle || 'os';
+  const labels = { project: 'PROJECT REPORT', coding: 'PROGRAMMING LAB', os: 'OS PRACTICAL', cn: 'COMPUTER NETWORKS', auto: 'CUSTOM / MIXED' };
+  document.getElementById('setupModeSummary').textContent = labels[mode] || 'CHOOSE A MODE ABOVE';
+  document.getElementById('setupFileSummary').textContent = { project: 'Your project, documented.', coding: 'Your practical, explained.', os: 'Commands with context.', cn: 'A consistent network plan.', auto: 'Every aim, in its format.' }[mode] || 'A clear, consistent format.';
+  document.getElementById('setupEmptyHint').style.display = mode ? 'none' : 'block';
+  document.getElementById('connection-card').style.display = mode === 'cn' ? 'none' : 'block';
   const opts = document.getElementById('mode-options');
   // Auto mode classifies each aim at generation time; OS + coding options both apply.
   opts.style.display = mode === 'auto' ? 'none' : 'block';
@@ -487,6 +523,7 @@ function toggleCollapse(id) {
   const chevron = document.getElementById('formatting-chevron');
   el.classList.toggle('open');
   chevron.style.transform = el.classList.contains('open') ? 'rotate(180deg)' : '';
+  document.querySelector(`[aria-controls="${id}"]`)?.setAttribute('aria-expanded', String(el.classList.contains('open')));
 }
 
 function proceedToAims() {
@@ -668,10 +705,10 @@ function renderProjectValidation() {
   const warnings = validation.warnings || [];
   if (validation.status === 'valid') {
     panel.classList.add('valid');
-    summary.innerHTML = '<span class="validation-ok"><i class="fas fa-circle-check"></i> Context is valid and ready.</span>';
+    summary.innerHTML = '<span class="validation-ok"><i aria-hidden="true" class="fas fa-circle-check"></i> Context is valid and ready.</span>';
   } else {
     panel.classList.add('invalid');
-    summary.innerHTML = '<span class="validation-error"><i class="fas fa-circle-xmark"></i> Context needs attention.</span>';
+    summary.innerHTML = '<span class="validation-error"><i aria-hidden="true" class="fas fa-circle-xmark"></i> Context needs attention.</span>';
   }
   details.innerHTML = [
     errors.length ? `<ul class="validation-error">${errors.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : '',
@@ -933,9 +970,9 @@ function renderProjectImages() {
   ].filter(Boolean);
   const content = state.projectFile.images.length ? state.projectFile.images.map((image, index) => `
     <span class="project-image-chip" title="${escapeHtml(image.caption)}">
-      <i class="fas fa-image" style="color:var(--accent)"></i>
+      <i aria-hidden="true" class="fas fa-image" style="color:var(--accent)"></i>
       <span>${escapeHtml(image.filename)} (${Math.round(image.bytes / 1024)} KB)</span>
-      <button type="button" onclick="removeProjectImage(${index})" aria-label="Remove image"><i class="fas fa-xmark"></i></button>
+      <button type="button" onclick="removeProjectImage(${index})" aria-label="Remove image"><i aria-hidden="true" class="fas fa-xmark"></i></button>
     </span>`).join('') : '<span class="helper">No images selected.</span>';
   containers.forEach(container => { container.innerHTML = content; });
   renderProjectExportImageStatus();
@@ -993,6 +1030,7 @@ function parseAims(text) {
 }
 
 if (aimsEditor) {
+  aimsEditor.addEventListener('scroll', () => { lineNumbers.scrollTop = aimsEditor.scrollTop; });
   aimsEditor.addEventListener('input', updateEditorDisplay);
 }
 if (editorBody) {
@@ -1120,7 +1158,7 @@ function renderProjectGenerationCard(status, message) {
   const title = state.projectFile.normalized?.project?.title || 'Project report';
   document.getElementById('expGrid').innerHTML = `
     <div class="exp-card project-generation-card ${statusClass}">
-      <span class="project-gen-kicker"><i class="fas ${icon}"></i> ${label}</span>
+      <span class="project-gen-kicker"><i aria-hidden="true" class="fas ${icon}"></i> ${label}</span>
       <h3>${escapeHtml(title)}</h3>
       <p>${escapeHtml(message || '')}</p>
     </div>`;
@@ -1152,6 +1190,7 @@ async function startProjectGeneration() {
     : 'All prose supplied. Assembling the validated report...';
   document.getElementById('genProgress').style.width = '15%';
   document.getElementById('genPercent').textContent = '15%';
+  document.getElementById('generationProgressTrack').setAttribute('aria-valuenow', '15');
   document.getElementById('genCount').textContent = '0 of 1';
   navigate('generation');
   renderProjectGenerationCard('generating', 'Validating facts and applying the selected report convention.');
@@ -1188,6 +1227,7 @@ async function startProjectGeneration() {
       const progress = Math.round(10 + 80 * (index + 1) / generatedFields.length);
       document.getElementById('genProgress').style.width = `${progress}%`;
       document.getElementById('genPercent').textContent = `${progress}%`;
+      document.getElementById('generationProgressTrack').setAttribute('aria-valuenow', String(progress));
       addGenLog(`Saved ${label}`, 'success');
     }
     const response = await fetch('/api/project/generate', {
@@ -1213,6 +1253,7 @@ async function startProjectGeneration() {
     state.generationComplete = true;
     document.getElementById('genProgress').style.width = '100%';
     document.getElementById('genPercent').textContent = '100%';
+    document.getElementById('generationProgressTrack').setAttribute('aria-valuenow', '100');
     document.getElementById('genCount').textContent = '1 of 1';
     document.getElementById('genSubtitle').textContent = 'Project report assembled successfully.';
     renderProjectGenerationCard('complete', 'The structured report is ready for review and Word export.');
@@ -1434,7 +1475,7 @@ function renderExpGrid() {
       <div class="exp-card ${exp.status}">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
           <span style="font-size:0.72rem;font-family:'JetBrains Mono',monospace;color:var(--muted);">EXP-${exp.number}</span>
-          <i class="fas ${statusIcons[exp.status]}" style="color:${statusColors[exp.status]};font-size:0.85rem;"></i>
+          <i aria-hidden="true" class="fas ${statusIcons[exp.status]}" style="color:${statusColors[exp.status]};font-size:0.85rem;"></i>
         </div>
         <p style="font-size:0.85rem;font-weight:600;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:0.3rem;">${escapeHtml(exp.aim)}</p>
         <p style="font-size:0.73rem;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4;">${escapeHtml(exp.aim)}</p>
@@ -1452,6 +1493,7 @@ function updateGenProgress() {
   const pct = Math.round((done / total) * 100);
   document.getElementById('genProgress').style.width = pct + '%';
   document.getElementById('genPercent').textContent = pct + '%';
+  document.getElementById('generationProgressTrack').setAttribute('aria-valuenow', String(pct));
   document.getElementById('genCount').textContent = `${done} of ${total}`;
 }
 
@@ -1552,7 +1594,7 @@ function renderProjectReview() {
             <span style="font:0.72rem 'JetBrains Mono',monospace;color:var(--accent);">SEC-${String(index + 1).padStart(2, '0')}</span>
             <span style="font-size:0.9rem;font-weight:600;flex:1;">${escapeHtml(label)}</span>
             ${report.generation?.generated_fields?.includes(key) ? '<span class="badge badge-amber">AI completed</span>' : '<span class="badge badge-muted">Supplied</span>'}
-            <i class="fas fa-chevron-down accordion-chevron ${isOpen ? 'open' : ''}"></i>
+            <i aria-hidden="true" class="fas fa-chevron-down accordion-chevron ${isOpen ? 'open' : ''}"></i>
           </button>
           <div class="accordion-body ${isOpen ? 'open' : ''}">
             <div class="project-review-body"><p>${escapeHtml(report.report_sections[key])}</p></div>
@@ -1601,13 +1643,13 @@ function renderReview() {
       stepsHtml = `
         <div style="margin-bottom:1rem;">
           <h4 style="font-size:0.8rem;font-weight:600;color:var(--text-sec);margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.05em;">
-            <i class="fas fa-code" style="margin-right:0.4rem;color:var(--amber);"></i>Code
+            <i aria-hidden="true" class="fas fa-code" style="margin-right:0.4rem;color:var(--amber);"></i>Code
           </h4>
           <div class="code-block">${escapeHtml(exp.code)}</div>
         </div>
         <div>
           <h4 style="font-size:0.8rem;font-weight:600;color:var(--text-sec);margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.05em;">
-            <i class="fas fa-terminal" style="margin-right:0.4rem;color:var(--success);"></i>Output
+            <i aria-hidden="true" class="fas fa-terminal" style="margin-right:0.4rem;color:var(--success);"></i>Output
           </h4>
           <div class="code-block terminal-output">${escapeHtml(exp.output)}</div>
         </div>
@@ -1616,20 +1658,22 @@ function renderReview() {
 
     return `
       <div class="accordion-item" id="acc-${realIdx}">
-        <div class="accordion-header" onclick="toggleAccordion(${realIdx})">
+        <div class="accordion-header">
+          <button class="accordion-toggle" onclick="toggleAccordion(${realIdx})" aria-expanded="${isOpen}" aria-controls="body-${realIdx}">
           <span style="font-size:0.75rem;font-family:'JetBrains Mono',monospace;color:var(--muted);flex-shrink:0;">EXP-${exp.number}</span>
           <span style="font-size:0.9rem;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:0.5rem;padding-right:0.5rem;">${escapeHtml(exp.aim)}</span>
           <span class="badge badge-accent" style="flex-shrink:0;margin-right:0.5rem;">${expIsCn(exp) ? 'CN' : expIsOs(exp) ? 'Linux' : (exp.codeLanguage || state.config.codeLang || 'C').toUpperCase()}</span>
-          <button class="btn btn-ghost" style="padding:0.3rem 0.65rem;font-size:0.78rem;flex-shrink:0;margin-right:0.5rem;" onclick="event.stopPropagation();${expIsCn(exp) ? `retryExperiment(${realIdx})` : `openRefineModal(${realIdx})`}">
-            <i class="fas fa-wand-magic-sparkles"></i> ${expIsCn(exp) ? 'REGENERATE' : 'REFINE'}
+          <i aria-hidden="true" class="fas fa-chevron-down accordion-chevron ${isOpen ? 'open' : ''}" id="chev-${realIdx}"></i>
           </button>
-          <i class="fas fa-chevron-down accordion-chevron ${isOpen ? 'open' : ''}" id="chev-${realIdx}"></i>
+          <button class="btn btn-ghost" style="padding:0.3rem 0.65rem;font-size:0.78rem;flex-shrink:0;margin-right:0.5rem;" onclick="event.stopPropagation();${expIsCn(exp) ? `retryExperiment(${realIdx})` : `openRefineModal(${realIdx})`}">
+            <i aria-hidden="true" class="fas fa-wand-magic-sparkles"></i> ${expIsCn(exp) ? 'REGENERATE' : 'REFINE'}
+          </button>
         </div>
         <div class="accordion-body ${isOpen ? 'open' : ''}" id="body-${realIdx}">
           <div style="padding:0 1.25rem 1.25rem;">
             <div style="margin-bottom:1.25rem;">
               <h4 style="font-size:0.8rem;font-weight:600;color:var(--text-sec);margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.05em;">
-                <i class="fas fa-book-open" style="margin-right:0.4rem;color:var(--accent);"></i>Theory
+                <i aria-hidden="true" class="fas fa-book-open" style="margin-right:0.4rem;color:var(--accent);"></i>Theory
               </h4>
               <p style="font-size:0.88rem;color:var(--text-sec);line-height:1.7;white-space:pre-line;">${escapeHtml(exp.theory)}</p>
             </div>
@@ -1653,16 +1697,22 @@ function toggleAccordion(idx) {
    REFINE MODAL
    ============================ */
 function openRefineModal(idx) {
+  if (!state.experiments[idx]) return;
+  state.refineReturnFocus = document.activeElement;
   state.refiningExp = idx;
   const exp = state.experiments[idx];
   document.getElementById('refineAim').textContent = exp.aim;
   document.getElementById('refineInput').value = '';
   document.getElementById('refine-modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  document.getElementById('refineInput').focus?.();
 }
 
 function closeRefineModal() {
   document.getElementById('refine-modal').classList.remove('open');
   state.refiningExp = null;
+  document.body.style.overflow = '';
+  state.refineReturnFocus?.focus?.();
 }
 
 async function applyRefine() {
@@ -1753,7 +1803,7 @@ function renderProjectExport() {
     : `${context.dbms.use_cases.length} SQL use cases · ${state.projectFile.images.length} screenshots`;
   list.innerHTML = `
     <div style="display:flex;align-items:center;gap:0.75rem;padding:0.8rem 0.9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
-      <i class="fas fa-file-word" style="color:var(--accent);font-size:1rem;"></i>
+      <i aria-hidden="true" class="fas fa-file-word" style="color:var(--accent);font-size:1rem;"></i>
       <div style="min-width:0;flex:1;"><p style="font-size:0.86rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(projectOutputFilename())}</p><p class="helper" style="margin:0;">${escapeHtml(detail)}</p></div>
       <span class="badge badge-accent">${escapeHtml(report.submode)}</span>
     </div>`;
@@ -1793,7 +1843,7 @@ function renderExport() {
   const list = document.getElementById('artifactList');
   list.innerHTML = complete.map(exp => `
     <div style="display:flex;align-items:center;gap:0.75rem;padding:0.65rem 0.85rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
-      <i class="fas fa-circle-check" style="color:var(--success);font-size:0.85rem;flex-shrink:0;"></i>
+      <i aria-hidden="true" class="fas fa-circle-check" style="color:var(--success);font-size:0.85rem;flex-shrink:0;"></i>
       <span style="font-size:0.75rem;font-family:'JetBrains Mono',monospace;color:var(--muted);flex-shrink:0;">EXP-${exp.number}</span>
       <span style="font-size:0.85rem;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(exp.aim)}</span>
     </div>
@@ -1890,7 +1940,7 @@ async function downloadDocument() {
 
     setTimeout(() => {
       btn.disabled = false;
-      btn.innerHTML = '<i class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT';
+      btn.innerHTML = '<i aria-hidden="true" class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT';
       btn.style.display = 'flex';
       document.getElementById('downloadSuccess').style.display = 'none';
     }, 5000);
@@ -1900,7 +1950,7 @@ async function downloadDocument() {
     showToast('error', `Bundle export error: ${err.message}`);
     addExportLog(`CRITICAL EXPORT ERROR: ${err.message}`, 'error');
     btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT';
+    btn.innerHTML = '<i aria-hidden="true" class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT';
   }
 }
 
@@ -1954,7 +2004,7 @@ async function downloadProjectDocument() {
     showToast('success', 'Project report downloaded.');
     setTimeout(() => {
       button.disabled = false;
-      button.innerHTML = '<i class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT';
+      button.innerHTML = '<i aria-hidden="true" class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT';
       button.style.display = 'flex';
       document.getElementById('downloadSuccess').style.display = 'none';
     }, 5000);
@@ -1962,7 +2012,7 @@ async function downloadProjectDocument() {
     addExportLog(`PROJECT EXPORT ERROR: ${err.message}`, 'error');
     showToast('error', `Project export error: ${err.message}`);
     button.disabled = false;
-    button.innerHTML = '<i class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT';
+    button.innerHTML = '<i aria-hidden="true" class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT';
   }
 }
 
@@ -2199,6 +2249,7 @@ function packExperimentForExport(exp, profile) {
    CONFETTI
    ============================ */
 function launchConfetti() {
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
   const canvas = document.getElementById('confetti-canvas');
   const ctx = canvas.getContext('2d');
   canvas.width = window.innerWidth;
@@ -2250,17 +2301,16 @@ function launchConfetti() {
 }
 
 /* ============================
-   MOUSE GLOW
-   ============================ */
-document.addEventListener('mousemove', (e) => {
-  document.body.style.setProperty('--mouse-x', (e.clientX / window.innerWidth).toFixed(3));
-  document.body.style.setProperty('--mouse-y', (e.clientY / window.innerHeight).toFixed(3));
-});
-
-/* ============================
    KEYBOARD NAV
    ============================ */
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab' && document.getElementById('refine-modal').classList.contains('open')) {
+    const controls = [...document.querySelectorAll('#refine-modal button, #refine-modal textarea')];
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+  }
   if (e.key === 'Escape') {
     if (document.getElementById('refine-modal').classList.contains('open')) closeRefineModal();
     closeSidebar();
@@ -2402,12 +2452,14 @@ function clearSession() {
   const banner = document.getElementById('restoreBanner');
   if (banner) banner.style.display = 'none';
   showToast('info', 'Saved session cleared.');
+  renderRecentSessions();
 }
 
 /* ============================
    INIT
    ============================ */
 function init() {
+  window.addEventListener?.('resize', revealActiveStep);
   initDashboard();
   loadFromLocalStorage();
   updateEditorDisplay();
@@ -2418,6 +2470,14 @@ function init() {
 
   // Enhancement 3 — offer to restore a previous session if one exists.
   maybeOfferRestore();
+  // Landing-page shortcuts choose a file type without discarding a saved session.
+  if (window.location?.search) {
+    const mode = new URLSearchParams(window.location.search).get('mode');
+    if (['project', 'lab', 'custom'].includes(mode)) {
+      selectMainMode(mode);
+      navigate('setup');
+    }
+  }
 }
 
 init();

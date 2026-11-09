@@ -1,545 +1,74 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PractiGen V6</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Turn project facts and experiment aims into well-formatted Word reports. Project files, programming labs, and OS/CN practicals in one workspace.">
+  <meta name="theme-color" content="#ff5757">
+  <title>PractiGen — Your work. Submission ready.</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="design.css"><link rel="stylesheet" href="landing.css">
+  <script src="landing.js" defer></script>
 </head>
 <body>
-<div id="app">
-  
-  <aside id="sidebar">
-    <div class="sidebar-logo">
-      <i class="fas fa-terminal"></i>
-      <span>PractiGen</span>
-    </div>
-    <nav class="sidebar-nav">
-      <a class="nav-item active" data-view="dashboard" onclick="navigate('dashboard')">
-        <i class="fas fa-grid-2"></i> Dashboard
-      </a>
-      <a class="nav-item" data-view="pipeline" onclick="navigateToPipeline()">
-        <i class="fas fa-bolt"></i> Pipeline
-      </a>
-    </nav>
-    <div class="sidebar-footer">
-      <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.25rem;">
-        <span style="width:6px;height:6px;border-radius:50%;background:var(--success);display:inline-block;"></span>
-        System Ready
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><div class="container header-inner">
+    <a class="brand" href="./" aria-label="PractiGen home"><span class="brand-mark"><i class="fas fa-terminal" aria-hidden="true"></i></span>PractiGen <span class="brand-version">WEB APP</span></a>
+    <nav class="header-nav" id="landing-nav" aria-label="Main navigation"><a href="#features">Features</a><a href="#workflow">How it works</a><a href="#demo">Preview</a><a href="https://github.com/tanish19078/generateassignment#readme">Docs <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a></nav>
+    <div class="header-actions"><a class="btn btn-primary" href="workspace.html">Open workspace <i class="fas fa-arrow-right" aria-hidden="true"></i></a><button class="menu-toggle" id="landing-menu" aria-label="Open navigation" aria-expanded="false" aria-controls="landing-nav"><i class="fas fa-bars" aria-hidden="true"></i></button></div>
+  </div></header>
+  <main id="main">
+    <section class="hero grid-paper"><div class="container">
+      <div class="hero-copy">
+        <span class="hero-kicker"><span class="status-dot"></span> BUILT FOR THE ENGINEERING WORKLOAD <i class="fas fa-arrow-right" aria-hidden="true"></i></span>
+        <h1>From experiment aims<br class="desktop-break"> to <span>submission-ready</span><br class="desktop-break"> practical files.</h1>
+        <p class="lead">Your project, your code, your last-minute lab list.<br class="desktop-break"> Turn it all into a clean Word document without spending<br class="desktop-break"> your evening fixing margins.</p>
+        <div class="hero-actions"><a class="btn btn-primary btn-lg" href="workspace.html">Create your first file <i class="fas fa-arrow-right" aria-hidden="true"></i></a><a class="btn btn-lg" href="#demo"><i class="far fa-circle-play" aria-hidden="true"></i> Explore the preview</a></div>
+        <p class="hero-note">NO ACCOUNT REQUIRED <span>•</span> BRING YOUR OWN AI ENDPOINT <span>•</span> EDITABLE WORD EXPORT</p>
       </div>
-      PractiGen V6.0.0
-    </div>
-  </aside>
+      <div class="demo-window" id="demo">
+        <div class="demo-titlebar"><div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div><span>practigen / your-next-submission</span><span class="demo-preview-tag">ILLUSTRATIVE PREVIEW</span></div>
+        <div class="demo-body">
+          <div class="demo-manifest"><div class="demo-pane-label"><i class="far fa-folder-open" aria-hidden="true"></i> FILE MANIFEST <span>03 formats</span></div>
+            <div class="demo-tabs" aria-label="Preview file type">
+              <button class="demo-tab active" data-demo="os" aria-pressed="true"><span class="eyebrow">01 / OS PRACTICAL</span><strong>A little command-line clarity.</strong><small>Linux commands, steps and terminal-style output.</small><span class="demo-tab-foot">file_permissions.docx <i class="fas fa-arrow-right" aria-hidden="true"></i></span></button>
+              <button class="demo-tab" data-demo="lab" aria-pressed="false"><span class="eyebrow">02 / PROGRAMMING LAB</span><strong>From an aim to an explanation.</strong><small>Theory, language-locked code and sample output.</small><span class="demo-tab-foot">sorting_lab.docx <i class="fas fa-arrow-right" aria-hidden="true"></i></span></button>
+              <button class="demo-tab" data-demo="project" aria-pressed="false"><span class="eyebrow">03 / PROJECT REPORT</span><strong>Your build, properly documented.</strong><small>Verified facts, structured prose and your screenshots.</small><span class="demo-tab-foot">project_report.docx <i class="fas fa-arrow-right" aria-hidden="true"></i></span></button>
+            </div><div class="manifest-foot"><span class="status-dot"></span> THREE WAYS TO MAKE IT YOURS</div>
+          </div>
+          <div class="demo-output" aria-live="polite"><div class="demo-output-top"><span id="demo-file">file_permissions.sh</span><span class="badge demo-output-badge">SAMPLE OUTPUT</span></div>
+            <pre id="demo-code"><span class="code-comment"># Explore file permissions in Linux</span>
 
-  
-  <div id="sidebar-overlay" onclick="closeSidebar()"></div>
+<span class="code-prompt">student@ubuntu:~$</span> touch practical.txt
+<span class="code-prompt">student@ubuntu:~$</span> chmod 644 practical.txt
+<span class="code-prompt">student@ubuntu:~$</span> ls -l practical.txt
 
-  
-  <div id="main-area">
-    
-    <header id="mobile-header">
-      <button onclick="openSidebar()" aria-label="Open menu"><i class="fas fa-bars"></i></button>
-      <span style="font-weight:600;font-size:0.95rem;">PractiGen</span>
-    </header>
+-rw-r--r-- 1 student student 0 practical.txt
 
-    
-    <div id="phase-stepper" style="display:none;">
-      <div class="step-item" data-step="1">
-        <div class="step-circle"><i class="fas fa-sliders"></i></div>
-        <span class="step-label">Setup</span>
+<span class="code-comment"># Read. Write. Understand.</span>
+Owner    → read + write
+Group    → read
+Others   → read</pre>
+            <div class="demo-document"><span class="document-icon"><i class="far fa-file-word" aria-hidden="true"></i></span><div><strong id="demo-document-name">File_Permissions.docx</strong><small>Aim → explanation → steps → sample output</small></div><i class="fas fa-check" aria-hidden="true"></i></div>
+            <a id="demo-start" href="workspace.html?mode=custom">Make an OS/CN/custom file <i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+          </div>
+        </div>
       </div>
-      <div class="step-line" data-line="1"></div>
-      <div class="step-item" data-step="2">
-        <div class="step-circle"><i class="fas fa-list-check"></i></div>
-        <span class="step-label" id="stepDataLabel">Aims</span>
+    </div></section>
+    <section class="capabilities-strip" aria-label="Supported capabilities"><div class="container"><p class="eyebrow">A SMALL TOOLKIT. A LOT LESS FORMATTING.</p><div class="capability-grid"><div><strong>3</strong><span>Main file modes</span><small>Project, lab and OS/CN/custom</small></div><div><strong>5</strong><span>Programming languages</span><small>C, C++, Python, Java, JavaScript</small></div><div><strong>8</strong><span>CN experiment recipes</span><small>Consistent plans, no AI key</small></div><div><strong>12</strong><span>Students per classroom ZIP</span><small>Separate Word files, one download</small></div></div></div></section>
+    <section class="features-section container" id="features">
+      <div class="section-intro"><span class="eyebrow">LESS BUSYWORK. MORE SUBSTANCE.</span><h2>Built around the work<br>you actually need to submit.</h2><p class="lead">From that first Linux practical to your final project report.<br>One workspace, with the right tools for each file.</p></div>
+      <div class="features-grid">
+        <article class="feature-card feature-wide"><span class="feature-icon navy"><i class="fas fa-terminal" aria-hidden="true"></i></span><h3>Commands with context.</h3><p>OS practicals get clear steps and terminal-style output. CN recipes keep network addresses, diagrams and configurations consistent from start to finish.</p><div class="mini-terminal"><span>student@ubuntu:~$ chmod 644 practical.txt</span><strong>→ Explanation, procedure and expected output.</strong></div><a href="workspace.html?mode=custom">Explore OS &amp; networking <i class="fas fa-arrow-right" aria-hidden="true"></i></a></article>
+        <article class="feature-card feature-wide"><span class="feature-icon coral"><i class="far fa-file-pdf" aria-hidden="true"></i></span><h3>Start with the syllabus.</h3><p>Paste a list, import a text file, or extract aims from a syllabus PDF. Review the list, choose a language, and let the drafting begin.</p><a class="feature-upload" href="workspace.html?mode=lab"><i class="fas fa-arrow-up-from-bracket" aria-hidden="true"></i><span>Your syllabus → a ready-to-edit aim list</span><small>PDF extraction uses your configured AI endpoint</small></a></article>
+        <article class="feature-card"><span class="feature-icon mint"><i class="fas fa-users" aria-hidden="true"></i></span><h3>A whole lab group,<br>one workflow.</h3><p>Generate per-student variations and export separate Word files together. Keep the same aims while varying examples and explanations.</p><span class="badge badge-success">CLASSROOM ZIP EXPORT</span></article>
+        <article class="feature-card"><span class="feature-icon lavender"><i class="fas fa-code" aria-hidden="true"></i></span><h3>Pick a language.<br>Keep it consistent.</h3><p>Choose your programming language, inspect the generated code, and request specific changes without rewriting the whole experiment.</p><div class="language-chips"><span>C</span><span>C++</span><span>Python</span><span>Java</span><span>JS</span></div></article>
+        <article class="feature-card"><span class="feature-icon navy"><i class="far fa-file-lines" aria-hidden="true"></i></span><h3>A report that knows<br>your project.</h3><p>Bring verified facts from your repository. Build Frontend or DBMS reports one section at a time, preserve your prose, and add your screenshots.</p><a href="workspace.html?mode=project">Build a project report <i class="fas fa-arrow-right" aria-hidden="true"></i></a></article>
       </div>
-      <div class="step-line" data-line="2"></div>
-      <div class="step-item" data-step="3">
-        <div class="step-circle"><i class="fas fa-microchip"></i></div>
-        <span class="step-label" id="stepGenerateLabel">Generate</span>
-      </div>
-      <div class="step-line" data-line="3"></div>
-      <div class="step-item" data-step="4">
-        <div class="step-circle"><i class="fas fa-magnifying-glass"></i></div>
-        <span class="step-label">Review</span>
-      </div>
-      <div class="step-line" data-line="4"></div>
-      <div class="step-item" data-step="5">
-        <div class="step-circle"><i class="fas fa-download"></i></div>
-        <span class="step-label">Export</span>
-      </div>
-    </div>
-
-    
-    <main id="content">
-
-
-      <div id="restoreBanner" style="display:none;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;margin-bottom:1.25rem;padding:0.85rem 1.1rem;border:1px solid var(--accent-border);background:var(--accent-dim);border-radius:10px;">
-        <span style="font-size:0.85rem;color:var(--text);">
-          <i class="fas fa-clock-rotate-left" style="margin-right:0.4rem;color:var(--accent);"></i>
-          <span id="restoreText">Previous session found. Restore?</span>
-        </span>
-        <span style="display:flex;gap:0.5rem;">
-          <button class="btn btn-primary" style="padding:0.35rem 0.9rem;font-size:0.8rem;" onclick="restoreSession()">Restore</button>
-          <button class="btn btn-secondary" style="padding:0.35rem 0.9rem;font-size:0.8rem;" onclick="clearSession()">Clear</button>
-        </span>
-      </div>
-
-
-      <section id="view-dashboard" class="view active">
-        <div style="max-width:780px;margin:0 auto;text-align:center">
-          <p style="color:var(--muted);font-size:.88rem;margin-bottom:.4rem" id="greeting">Good evening.</p>
-          <h1 style="font-size:2.4rem;font-weight:700;letter-spacing:-.03em;line-height:1.12;margin-bottom:.85rem">
-            Your work, in a <span style="color:var(--accent)">formatted</span><br>Word file.
-          </h1>
-          <p style="color:var(--text-sec);font-size:.95rem;max-width:480px;margin:0 auto 1.75rem;line-height:1.55">
-            Create a project report, programming lab file, or OS/CN/custom practical. Add your project facts or experiment aims, review, and download.
-          </p>
-          <button class="btn btn-primary btn-lg" onclick="startNewProject()" style="font-size:1.05rem;padding:.85rem 2.2rem">
-            <i class="fas fa-plus"></i> Start New File
-          </button>
-
-          
-          <div class="pipeline-flow" style="margin:3rem 0 1rem">
-            <div class="flow-step"><div class="flow-icon"><i class="fas fa-paste"></i></div><span class="flow-label">Add Inputs</span></div>
-            <div class="flow-arrow"><i class="fas fa-arrow-right"></i></div>
-            <div class="flow-step"><div class="flow-icon"><i class="fas fa-microchip"></i></div><span class="flow-label">AI Generates</span></div>
-            <div class="flow-arrow"><i class="fas fa-arrow-right"></i></div>
-            <div class="flow-step"><div class="flow-icon"><i class="fas fa-magnifying-glass"></i></div><span class="flow-label">Review</span></div>
-            <div class="flow-arrow"><i class="fas fa-arrow-right"></i></div>
-            <div class="flow-step"><div class="flow-icon"><i class="fas fa-file-arrow-down"></i></div><span class="flow-label">Download</span></div>
-          </div>
-          <div style="display:flex;justify-content:center;gap:.5rem;margin-bottom:3rem;flex-wrap:wrap">
-            <span class="badge badge-amber" style="font-size:.65rem;padding:.15rem .5rem">Word export</span>
-            <span class="badge badge-teal" style="font-size:.65rem;padding:.15rem .5rem">Custom AI endpoint</span>
-            <span style="color:var(--muted);font-size:.72rem;line-height:1.8">Keep your progress with session restore</span>
-          </div>
-
-          <div style="text-align:left">
-            <h2 style="font-size:.95rem;font-weight:600;margin-bottom:.85rem;color:var(--text-sec)">Recent Sessions</h2>
-            <div id="recent-sessions" style="display:flex;flex-direction:column;gap:.4rem"></div>
-          </div>
-        </div>
-      </section>
-
-      
-      <section id="view-setup" class="view">
-        <div class="grid-2" style="display:grid;grid-template-columns:1fr 320px;gap:2rem;align-items:start;">
-          <div>
-            
-            <div style="margin-bottom:2rem;">
-              <label class="label">Generation Mode</label>
-              <div style="display:flex;flex-wrap:wrap;gap:1rem;margin-top:0.5rem;">
-                <button type="button" class="mode-card" data-mode="project" onclick="selectMainMode('project')" aria-pressed="false">
-                  <i class="fas fa-folder-open"></i><h4>Project files</h4>
-                  <p>Frontend and DBMS reports from your existing project's facts and screenshots.</p>
-                </button>
-                <button type="button" class="mode-card" data-mode="lab" onclick="selectMainMode('lab')" aria-pressed="false">
-                  <i class="fas fa-code"></i><h4>Lab files</h4>
-                  <p>Programming practicals with explanations, source code and sample output.</p>
-                </button>
-                <button type="button" class="mode-card" data-mode="custom" onclick="selectMainMode('custom')" aria-pressed="false">
-                  <i class="fas fa-terminal"></i><h4>OS/CN/Custom files</h4>
-                  <p>Linux commands, networking experiments, or mixed aims detected individually.</p>
-                </button>
-              </div>
-              <div id="custom-file-options" style="display:none;margin-top:1rem;">
-                <label class="label" for="fileStyle">File type</label>
-                <select class="select" id="fileStyle" onchange="selectMode(this.value)">
-                  <option value="os">OS - Linux commands and terminal steps</option>
-                  <option value="cn">CN - networking plans and diagrams (no API key)</option>
-                  <option value="auto">Custom - auto-detect each aim and language</option>
-                </select>
-              </div>
-              <div id="mode-options" style="margin-top:1rem;display:none;">
-                <div id="os-options" style="display:none;">
-                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
-                    <div><label class="label">Terminal Username</label><input class="input" id="termUser" value="student" placeholder="e.g. student"></div>
-                    <div><label class="label">Hostname</label><input class="input" id="termHost" value="ubuntu" placeholder="e.g. ubuntu"></div>
-                  </div>
-                </div>
-                <div id="cn-options" style="display:none;">
-                  <div class="cn-student-fields">
-                    <div><label class="label" for="cnName">Student Name</label><input class="input" id="cnName" maxlength="100" autocomplete="name" placeholder="Your name"></div>
-                    <div><label class="label" for="cnRoll">Roll Number</label><input class="input" id="cnRoll" maxlength="100" placeholder="Your roll number"></div>
-                    <div><label class="label" for="cnSection">Class / Section (optional)</label><input class="input" id="cnSection" maxlength="100" placeholder="e.g. CSE 3A"></div>
-                  </div>
-                  <p class="helper">Eight CN experiment types. No API key needed. Personalised figures and expected outputs are included; real simulator captures are not connected yet.</p>
-                </div>
-                <div id="project-options" style="display:none;">
-                  <label class="label">Project Report Type</label>
-                  <div class="project-submode-grid" role="radiogroup" aria-label="Project report type">
-                    <button type="button" class="project-submode-card" data-project-submode="frontend" onclick="selectProjectSubmode('frontend')" role="radio" aria-checked="false">
-                      <i class="fas fa-window-maximize"></i><span>Frontend</span><small>UI architecture, methodology and screenshot-led results</small>
-                    </button>
-                    <button type="button" class="project-submode-card" data-project-submode="dbms" onclick="selectProjectSubmode('dbms')" role="radio" aria-checked="false">
-                      <i class="fas fa-database"></i><span>DBMS</span><small>ERD, schema and implemented SQL use cases</small>
-                    </button>
-                    <button type="button" class="project-submode-card" disabled aria-disabled="true">
-                      <i class="fab fa-java"></i><span>Java</span><small>Awaiting report conventions</small>
-                    </button>
-                  </div>
-                  <p class="helper">Compact collection leaves prose blank for drafting here. Existing complete reports can also be imported without an API key. Verified project facts are always required from the context pack.</p>
-                </div>
-                <div id="coding-options" style="display:none;">
-                  <label class="label">Code Language</label>
-                  <select class="select" id="codeLang">
-                    <option value="c">C</option><option value="cpp">C++</option>
-                    <option value="python">Python</option><option value="java">Java</option>
-                    <option value="javascript">JavaScript</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            
-            <div id="model-options" style="margin-bottom:2rem;">
-              <label class="label" for="apiEndpoint">AI endpoint</label>
-              <input class="input" id="apiEndpoint" type="url" placeholder="Default / server endpoint (Groq unless configured)">
-              <p class="helper">Optional OpenAI-compatible API base URL, such as https://your-host/v1. Leave blank to use the server default.</p>
-              <label class="label" for="customModel" style="margin-top:.8rem;">Model ID</label>
-              <input class="input" id="customModel" placeholder="Default / server model (openai/gpt-oss-120b)">
-              <p class="helper">One default model. For a custom endpoint, enter the model ID that endpoint supports.</p>
-            </div>
-
-
-            <div id="key-options" style="margin-bottom:2rem;">
-              <label class="label">API Key</label>
-              <div style="position:relative;">
-                <i class="fas fa-lock" style="position:absolute;left:0.85rem;top:50%;transform:translateY(-50%);color:var(--muted);font-size:0.8rem;"></i>
-                <input class="input" id="apiKey" type="password" placeholder="Enter your API key" style="padding-left:2.25rem;">
-                <button class="btn-ghost" onclick="toggleApiKey()" style="position:absolute;right:0.5rem;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;" aria-label="Toggle visibility">
-                  <i class="fas fa-eye" id="apiKeyEye"></i>
-                </button>
-              </div>
-              <p class="helper">Leave empty to use the server key for its configured endpoint. Keys are never reused for a different endpoint.</p>
-            </div>
-
-            <label id="quality-options" style="display:flex;align-items:flex-start;gap:.65rem;margin:-.75rem 0 2rem;cursor:pointer;">
-              <input id="jevQualityGate" type="checkbox" style="margin-top:.2rem;accent-color:var(--accent);">
-              <span>
-                <strong style="font-size:.88rem;">Jev quality gate</strong>
-                <span class="helper" style="display:block;margin:0;">Optional advisory review after generation. Requires <code>OPENROUTER_API_KEY</code> on the server; it never blocks or changes your assignment.</span>
-              </span>
-            </label>
-
-            
-            <div id="formatting-shell" style="border:1px solid var(--border);border-radius:10px;overflow:hidden;">
-              <button onclick="toggleCollapse('formatting-section')" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:0.85rem 1rem;background:var(--bg);border:none;color:var(--text-sec);cursor:pointer;font-family:inherit;font-size:0.85rem;font-weight:600;">
-                <span><i class="fas fa-palette" style="margin-right:0.5rem;color:var(--muted);"></i>Document Formatting</span>
-                <i class="fas fa-chevron-down" style="font-size:0.7rem;transition:transform 0.3s;" id="formatting-chevron"></i>
-              </button>
-              <div class="collapse-content" id="formatting-section">
-                <div style="padding:1rem;display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
-                  <div><label class="label">Font Family</label><select class="select" id="fmtFont"><option>Times New Roman</option><option>Arial</option><option>Calibri</option><option>Consolas</option></select></div>
-                  <div><label class="label">Heading Size (pt)</label><input class="input" type="number" id="fmtHeading" value="16" min="10" max="28"></div>
-                  <div><label class="label">Body Size (pt)</label><input class="input" type="number" id="fmtBody" value="12" min="8" max="20"></div>
-                  <div><label class="label">Code Size (pt)</label><input class="input" type="number" id="fmtCode" value="9" min="6" max="16"></div>
-                  <div><label class="label">Image Width (%)</label><input class="input" type="number" id="fmtImgW" value="85" min="30" max="100"></div>
-                  <div><label class="label">Terminal Width (%)</label><input class="input" type="number" id="fmtTermW" value="90" min="30" max="100"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          
-          <div style="position:sticky;top:2rem;">
-            <div class="card" style="margin-bottom:1rem;">
-              <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">
-                <span style="width:8px;height:8px;border-radius:50%;background:var(--success);"></span>
-                <span id="setupStatusTitle" style="font-weight:600;font-size:0.9rem;">Ready to go</span>
-              </div>
-              <p id="setupStatusText" style="font-size:0.8rem;color:var(--muted);line-height:1.5;">Configure your settings, then proceed to write your experiment aims.</p>
-            </div>
-            <button class="btn btn-primary btn-lg" id="setupProceedBtn" style="width:100%;justify-content:center;" onclick="proceedToAims()">
-              <span id="setupProceedLabel">Proceed to Aims</span> <i class="fas fa-arrow-right"></i>
-            </button>
-            <div class="card" style="margin-top:1rem;background:var(--amber-dim);border-color:rgba(240,160,48,0.15);">
-              <p style="font-size:0.78rem;color:var(--amber);line-height:1.5;">
-                <i class="fas fa-lightbulb" style="margin-right:0.35rem;"></i>
-                <strong>Pro tip:</strong> A complete Project context needs no AI call. Compact facts need an API key for drafting; CN experiments need no key.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      
-      <section id="view-aims" class="view">
-        <div id="standard-aims-panel">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:0.75rem;">
-            <div>
-              <h2 style="font-size:1.4rem;font-weight:700;letter-spacing:-0.02em;">Experiment List</h2>
-              <p style="font-size:0.82rem;color:var(--muted);margin-top:0.2rem;">Write or import your experiment aims, separated by <code style="background:var(--hover);padding:0.1rem 0.35rem;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:0.78rem;">---</code></p>
-            </div>
-            <div style="display:flex;gap:0.5rem;">
-              <button class="btn btn-secondary" onclick="importFile()"><i class="fas fa-file-import"></i> Import File</button>
-              <button class="btn btn-secondary" onclick="loadSamples()"><i class="fas fa-flask"></i> Load Samples</button>
-            </div>
-          </div>
-          <input type="file" id="fileInput" accept=".txt" style="display:none;" onchange="handleFileImport(event)">
-
-          <div class="editor-window" id="editorWindow">
-            <div class="editor-chrome">
-              <div class="chrome-dot red"></div>
-              <div class="chrome-dot yellow"></div>
-              <div class="chrome-dot green"></div>
-              <div class="chrome-tab">AIMS_MANIFEST.PGEN</div>
-            </div>
-            <div class="editor-body" id="editorBody">
-              <div class="line-numbers" id="lineNumbers">1</div>
-              <div class="editor-highlight" id="editorHighlight"></div>
-              <textarea id="aimsEditor" spellcheck="false" placeholder="Write a C program to implement FCFS CPU scheduling algorithm
----
-Write a C program to implement SJF (Non-preemptive) CPU scheduling algorithm
----
-Write a shell script to calculate factorial of a number
----
-Write a C program to simulate Banker's Algorithm for deadlock avoidance"></textarea>
-            </div>
-          </div>
-
-          <div style="margin-top:1rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
-            <button class="btn btn-ghost" onclick="importSyllabusPdf()">
-              <i class="fas fa-file-pdf" style="color:var(--error);"></i> Syllabus PDF Upload
-            </button>
-            <button class="btn btn-ghost" onclick="autoDetectAims()">
-              <i class="fas fa-wand-magic-sparkles" style="color:var(--accent);"></i> Auto-Detect Mode
-            </button>
-            <input type="file" id="pdfInput" accept=".pdf" style="display:none;" onchange="handlePdfImport(event)">
-            <span class="badge badge-muted" id="aimCountBadge">0 experiments detected</span>
-          </div>
-
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border);flex-wrap:wrap;gap:0.75rem;">
-            <button class="btn btn-secondary" onclick="navigate('setup')"><i class="fas fa-arrow-left"></i> Back to Setup</button>
-            <button class="btn btn-primary btn-lg" id="startGenBtn" onclick="startGeneration()" disabled>
-              Start Generation <i class="fas fa-bolt"></i>
-            </button>
-          </div>
-        </div>
-
-        <div id="project-file-panel" style="display:none;">
-          <div class="project-bridge-header">
-            <div>
-              <span class="badge badge-accent" id="projectSubmodeBadge">FRONTEND</span>
-              <h2>Build a verified context pack</h2>
-              <p>Run the collector in the AI session that already knows your project, then return its JSON here.</p>
-            </div>
-            <button class="btn btn-secondary" onclick="navigate('setup')"><i class="fas fa-sliders"></i> Change Type</button>
-          </div>
-
-          <div class="project-bridge-grid">
-            <section class="card project-stage-card">
-              <div class="project-stage-number">1</div>
-              <div class="project-stage-heading">
-                <h3>Send the collector prompt</h3>
-                <p>Paste this into Cursor, Claude, OpenCode, or another repository-aware session.</p>
-              </div>
-              <pre class="project-prompt" id="projectCollectorPrompt">Loading collector prompt...</pre>
-              <button class="btn btn-secondary" id="copyProjectPromptBtn" onclick="copyProjectPrompt()"><i class="fas fa-copy"></i> Copy Prompt</button>
-            </section>
-
-            <section class="card project-stage-card">
-              <div class="project-stage-number">2</div>
-              <div class="project-stage-heading">
-                <h3>Import compact project facts</h3>
-                <p>Paste the complete facts-only response or import its <code>.json</code> file. Long report prose is drafted here, one section at a time.</p>
-              </div>
-              <textarea class="textarea project-context-input" id="projectContextInput" spellcheck="false" placeholder='{"schema_version":1,"submode":"frontend",...}'></textarea>
-              <p class="helper" id="projectContextSize">0 characters · limit 300,000</p>
-              <input type="file" id="projectContextFile" accept=".json,application/json" style="display:none;" onchange="handleProjectContextFile(event)">
-              <div class="project-action-row">
-                <button class="btn btn-secondary" onclick="document.getElementById('projectContextFile').click()"><i class="fas fa-file-import"></i> Import JSON</button>
-                <button class="btn btn-primary" id="validateProjectBtn" onclick="validateProjectContext()"><i class="fas fa-shield-halved"></i> Validate Context</button>
-              </div>
-              <div class="project-validation" id="projectValidationPanel" aria-live="polite">
-                <p id="projectValidationSummary">Validation has not run yet.</p>
-                <div id="projectValidationDetails"></div>
-              </div>
-            </section>
-          </div>
-
-          <section class="card project-screenshot-card">
-            <div>
-              <h3><i class="fas fa-images"></i> Report figures and screenshots</h3>
-              <p>Optional during generation, but required for screenshot-led results. PNG/JPEG files are resized locally and matched by filename from the context pack.</p>
-            </div>
-            <button type="button" class="btn btn-secondary" id="projectImageButton" onclick="document.getElementById('projectImageInput').click()"><i class="fas fa-upload"></i> Add Images</button>
-            <input type="file" id="projectImageInput" accept="image/png,image/jpeg" multiple style="display:none;" onchange="handleProjectImages(event)">
-            <div id="projectImageList" class="project-image-list"><span class="helper">No images selected.</span></div>
-          </section>
-
-          <div class="project-footer-actions">
-            <button class="btn btn-secondary" onclick="navigate('setup')"><i class="fas fa-arrow-left"></i> Back to Setup</button>
-            <button class="btn btn-primary btn-lg" id="projectGenerateBtn" onclick="startProjectGeneration()" disabled>
-              Build Project Report <i class="fas fa-file-lines"></i>
-            </button>
-          </div>
-        </div>
-      </section>
-
-      
-      <section id="view-generation" class="view">
-        
-        <div class="card" style="margin-bottom:1.75rem;padding:1.5rem 1.75rem;">
-          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1rem;">
-            <div>
-              <h2 id="generationTitle" style="font-size:1.3rem;font-weight:700;letter-spacing:-0.02em;display:flex;align-items:center;gap:0.75rem;">
-                AI Generation
-                <div class="spinner" id="genSpinner"></div>
-              </h2>
-              <p style="font-size:0.85rem;color:var(--muted);margin-top:0.25rem;" id="genSubtitle">Processing your experiments...</p>
-            </div>
-            <div style="text-align:right;">
-              <span style="font-size:1.8rem;font-weight:700;color:var(--accent);" id="genPercent">0%</span>
-              <p style="font-size:0.78rem;color:var(--muted);" id="genCount">0 of 0</p>
-            </div>
-          </div>
-          <div class="progress-track"><div class="progress-fill" id="genProgress" style="width:0%;"></div></div>
-        </div>
-
-        <div class="grid-2" style="display:grid;grid-template-columns:1fr 340px;gap:1.5rem;align-items:start;">
-          
-          <div>
-            <div id="expGrid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.75rem;"></div>
-          </div>
-          
-          <div>
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
-              <span style="font-size:0.8rem;font-weight:600;color:var(--text-sec);">Live Log</span>
-              <span style="font-size:0.7rem;color:var(--muted);">Auto-scrolling</span>
-            </div>
-            <div class="terminal" id="genTerminal"></div>
-          </div>
-        </div>
-
-        
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border);flex-wrap:wrap;gap:0.75rem;">
-          <button class="btn btn-secondary" onclick="stopGeneration()"><i class="fas fa-arrow-left"></i> <span id="generationBackLabel">Modify Aims</span></button>
-          <button class="btn btn-primary btn-lg" id="reviewBtn" style="display:none;" onclick="navigate('review')">
-            Review Results <i class="fas fa-arrow-right"></i>
-          </button>
-        </div>
-      </section>
-
-      
-      <section id="view-review" class="view">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:0.75rem;">
-          <div style="display:flex;align-items:center;gap:0.75rem;">
-            <h2 id="reviewTitle" style="font-size:1.4rem;font-weight:700;letter-spacing:-0.02em;">Review Results</h2>
-            <span class="badge badge-accent" id="reviewCountBadge">0 experiments ready</span>
-          </div>
-          <button class="btn btn-primary" onclick="navigate('export')">
-            Proceed to Download <i class="fas fa-arrow-right"></i>
-          </button>
-        </div>
-        <div id="reviewAccordion"></div>
-      </section>
-
-      
-      <section id="view-export" class="view">
-        <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1.5rem;">
-          <h2 id="exportTitle" style="font-size:1.4rem;font-weight:700;letter-spacing:-0.02em;">Final Document</h2>
-          <span class="badge badge-accent" style="font-size:0.8rem;padding:0.3rem 0.75rem;">READY</span>
-        </div>
-        <div class="grid-2" style="display:grid;grid-template-columns:1fr 360px;gap:2rem;align-items:start;">
-          
-          <div>
-            <h3 id="artifactListTitle" style="font-size:0.9rem;font-weight:600;color:var(--text-sec);margin-bottom:0.75rem;">Experiments Included</h3>
-            <div id="artifactList" style="display:flex;flex-direction:column;gap:0.5rem;"></div>
-            <div style="margin-top:1rem;padding:0.75rem 1rem;background:var(--bg);border-radius:8px;border:1px solid var(--border);display:flex;justify-content:space-between;font-size:0.82rem;color:var(--muted);">
-              <span id="artifactTotal">0 experiments</span>
-              <span id="artifactSize">~0 KB estimated</span>
-            </div>
-          </div>
-          
-          <div>
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
-              <span style="font-size:0.8rem;font-weight:600;color:var(--text-sec);">Export Log</span>
-            </div>
-            <div class="terminal" id="exportTerminal" style="margin-bottom:1.5rem;"></div>
-            <div id="projectExportImagePanel" class="project-export-images" style="display:none;">
-              <div>
-                <strong>Required screenshots</strong>
-                <p id="projectExportImageStatus">No screenshots uploaded.</p>
-              </div>
-              <button type="button" class="btn btn-secondary" id="projectExportImageButton" onclick="document.getElementById('projectImageInput').click()"><i class="fas fa-images"></i> Add Images</button>
-              <div id="projectExportImageList" class="project-image-list"></div>
-            </div>
-            <div style="text-align:center;padding:1.5rem 0;" id="downloadArea">
-              <button class="download-btn" id="downloadBtn" onclick="downloadDocument()">
-                <i class="fas fa-cloud-arrow-down"></i> DOWNLOAD DOCUMENT
-              </button>
-              <div id="downloadSuccess" style="display:none;margin-top:1.25rem;">
-                <i class="fas fa-circle-check" style="font-size:2rem;color:var(--success);"></i>
-                <p style="color:var(--success);font-weight:600;margin-top:0.5rem;">Document downloaded successfully</p>
-              </div>
-              <button class="btn btn-secondary" style="margin-top:1rem;" onclick="navigate('dashboard')">
-                <i class="fas fa-house"></i> Return to Dashboard
-              </button>
-            </div>
-            
-            <div id="classroom-panel" style="border:1px solid var(--border);border-radius:10px;padding:1.25rem;margin-top:1.5rem;">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
-                <span style="font-size:0.85rem;font-weight:600;">Classroom Mode</span>
-                <label style="position:relative;width:40px;height:22px;cursor:pointer;">
-                  <input type="checkbox" id="classroomToggle" onchange="toggleClassroom()" style="opacity:0;width:0;height:0;">
-                  <span style="position:absolute;inset:0;background:var(--border);border-radius:11px;transition:background 0.2s;"></span>
-                  <span style="position:absolute;top:3px;left:3px;width:16px;height:16px;background:var(--text);border-radius:50%;transition:transform 0.2s;" id="classroomKnob"></span>
-                </label>
-              </div>
-              <div id="classroomOptions" style="display:none;">
-                <label class="label">Number of Students</label>
-                <input class="input" type="number" id="studentCount" value="30" min="2" max="200" style="margin-bottom:0.75rem;">
-                <button class="btn btn-secondary" id="classroomBtn" style="width:100%;justify-content:center;" onclick="downloadClassroomZip()">
-                  <i class="fas fa-file-zipper"></i> Download All Variations (ZIP)
-                </button>
-                <p class="helper" style="margin-top:0.5rem;">Each file will have unique variable names, examples, and data. Capped at 12 students per batch.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-    </main>
-  </div>
-</div>
-
-
-<div id="refine-modal">
-  <div class="modal-backdrop" onclick="closeRefineModal()"></div>
-  <div class="modal-content">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
-      <h3 style="font-size:1.1rem;font-weight:700;">Refine Experiment</h3>
-      <button class="btn-ghost" onclick="closeRefineModal()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:1.1rem;padding:4px;" aria-label="Close"><i class="fas fa-xmark"></i></button>
-    </div>
-    <div style="background:var(--bg);border-radius:8px;padding:0.85rem;margin-bottom:1rem;border:1px solid var(--border);">
-      <p style="font-size:0.78rem;color:var(--muted);margin-bottom:0.25rem;">Current Aim</p>
-      <p style="font-size:0.88rem;line-height:1.5;" id="refineAim"></p>
-    </div>
-    <label class="label">What should change?</label>
-    <textarea class="textarea" id="refineInput" rows="3" placeholder="Describe what you want to improve..." style="margin-bottom:0.75rem;"></textarea>
-    <div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:1.25rem;">
-      <button class="chip" onclick="document.getElementById('refineInput').value='Add more comments to the code'">Add more comments</button>
-      <button class="chip" onclick="document.getElementById('refineInput').value='Use different variable names'">Different variable names</button>
-      <button class="chip" onclick="document.getElementById('refineInput').value='Explain the logic better in theory'">Explain logic better</button>
-      <button class="chip" onclick="document.getElementById('refineInput').value='Add more test cases in the output'">More test cases</button>
-    </div>
-    <button class="btn btn-primary" style="width:100%;justify-content:center;" onclick="applyRefine()">
-      <i class="fas fa-check"></i> Apply Changes
-    </button>
-  </div>
-</div>
-
-
-<div id="toast-container"></div>
-
-
-<canvas id="confetti-canvas"></canvas>
-
-<script src="script.js" defer></script>
+    </section>
+    <section class="workflow-section" id="workflow"><div class="container"><div class="section-intro centered"><span class="eyebrow">FROM INPUT TO HAND-IN</span><h2>A familiar workflow.<br>A much cleaner finish.</h2><p class="lead">Stay in control of the content. Let the document take shape around it.</p></div><div class="workflow-grid"><article class="workflow-card"><span class="badge badge-muted">01 — 02 / PREPARE &amp; GENERATE</span><h3>Bring the substance.</h3><ul><li><span>01</span><div><strong>Choose your file.</strong><p>Project report, programming lab, or OS/CN/custom practical. Configure only what you need.</p></div></li><li><span>02</span><div><strong>Add your inputs.</strong><p>Paste aims or import compact project facts. Generate content, with progress saved as you go.</p></div></li></ul><div class="workflow-note"><i class="far fa-bookmark" aria-hidden="true"></i> A failed project section can be retried without losing the rest.</div></article><article class="workflow-card workflow-card-accent"><span class="badge badge-accent">03 — 04 / REVIEW &amp; EXPORT</span><h3>Give it the final word.</h3><ul><li><span>03</span><div><strong>Review before you submit.</strong><p>Check explanations and sample output, refine lab content, and attach the project screenshots you declared.</p></div></li><li><span>04</span><div><strong>Download something editable.</strong><p>Get a formatted .docx with headings, tables and figures. Make final adjustments in your Word editor.</p></div></li></ul><div class="workflow-note"><i class="far fa-file-word" aria-hidden="true"></i> Your content stays editable after export.</div></article></div></div></section>
+    <section class="final-cta container"><span class="feature-icon coral"><i class="far fa-paper-plane" aria-hidden="true"></i></span><h2>Make your next submission<br>a little less last-minute.</h2><p class="lead">Open the workspace. Bring your aims. Take the formatting off your list.</p><div class="hero-actions"><a class="btn btn-primary btn-lg" href="workspace.html">Let's make a file <i class="fas fa-arrow-right" aria-hidden="true"></i></a><a class="btn btn-lg" href="https://github.com/tanish19078/generateassignment#readme">Read the docs</a></div><p class="helper">No account needed. AI drafting uses your endpoint; CN recipes work without a key.</p></section>
+  </main>
+  <footer class="footer-shell"><div class="container page-footer"><div><strong>PractiGen</strong><span class="footer-divider">/</span>Built for the practical side of engineering.</div><div class="footer-links"><a href="workspace.html">Workspace</a><a href="https://github.com/tanish19078/generateassignment">GitHub</a><a href="https://github.com/tanish19078/generateassignment#readme">Documentation</a></div></div></footer>
 </body>
 </html>

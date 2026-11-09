@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ff5757"><title>Workspace — PractiGen</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="design.css"><link rel="stylesheet" href="workspace.css">
+  <script src="script.js" defer></script>
+</head>
+<body class="workspace-page">
+  <a class="skip-link" href="#content">Skip to workspace</a>
+  <div id="app">
+    <header class="site-header"><div class="container header-inner">
+      <a class="brand" href="./" aria-label="PractiGen home"><span class="brand-mark"><i class="fas fa-terminal" aria-hidden="true"></i></span>PractiGen <span class="brand-version">WORKSPACE</span></a>
+      <nav class="header-nav" id="sidebar" aria-label="Workspace navigation">
+        <button class="nav-item active" data-view="dashboard" onclick="navigate('dashboard')"><i class="fas fa-table-cells-large" aria-hidden="true"></i> Overview</button>
+        <button class="nav-item" data-view="pipeline" onclick="navigateToPipeline()"><i class="fas fa-layer-group" aria-hidden="true"></i> File builder</button>
+        <a href="https://github.com/tanish19078/generateassignment#readme">Documentation <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+      </nav>
+      <div class="header-actions"><span class="badge badge-muted"><span class="status-dot"></span> BROWSER WORKSPACE</span><button class="btn btn-primary" onclick="startNewProject()"><i class="fas fa-plus" aria-hidden="true"></i> New file</button><button class="menu-toggle" id="workspace-menu" onclick="toggleWorkspaceMenu()" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><i class="fas fa-bars" aria-hidden="true"></i></button></div>
+    </div></header>
+    <div id="sidebar-overlay" onclick="closeSidebar()"></div>
+    <div id="main-area" class="container">
+      <div id="restoreBanner" class="restore-banner" style="display:none;"><div><i class="fas fa-clock-rotate-left" aria-hidden="true"></i><span id="restoreText">A previous session is available.</span></div><div class="action-row"><button class="btn btn-dark" onclick="restoreSession()">Restore</button><button class="btn btn-ghost" onclick="clearSession()">Clear</button></div></div>
+      <nav id="phase-stepper" class="phase-stepper" aria-label="File creation steps" style="display:none;">
+        <button class="step-item" data-step="1" onclick="navigateStep('setup')"><span><b>01</b> Setup <i class="fas fa-sliders" aria-hidden="true"></i></span><small>File type &amp; preferences</small></button>
+        <button class="step-item" data-step="2" onclick="navigateStep('aims')"><span><b>02</b> <span id="stepDataLabel">Aims</span><i class="far fa-file-lines" aria-hidden="true"></i></span><small>Your source material</small></button>
+        <button class="step-item" data-step="3" onclick="navigateStep('generation')"><span><b>03</b> <span id="stepGenerateLabel">Generate</span><i class="fas fa-bolt" aria-hidden="true"></i></span><small>Watch it take shape</small></button>
+        <button class="step-item" data-step="4" onclick="navigateStep('review')"><span><b>04</b> Review<i class="fas fa-magnifying-glass" aria-hidden="true"></i></span><small>Check the details</small></button>
+        <button class="step-item" data-step="5" onclick="navigateStep('export')"><span><b>05</b> Export<i class="fas fa-arrow-down" aria-hidden="true"></i></span><small>Your finished Word file</small></button>
+      </nav>
+      <main id="content" tabindex="-1">
+        <section id="view-dashboard" class="view active" aria-label="Workspace overview">
+          <div class="welcome-panel card grid-paper"><div><span class="eyebrow" id="greeting">WELCOME BACK</span><h1>Your next submission<br>starts here.</h1><p>Project facts or practical aims. Bring your work,<br class="desktop-break"> and leave the document formatting to us.</p><div class="mini-pipeline"><span>01 Set up</span><i class="fas fa-arrow-right" aria-hidden="true"></i><span>02 Add inputs</span><i class="fas fa-arrow-right" aria-hidden="true"></i><span>03 Review &amp; export</span></div></div><div class="welcome-note"><span class="badge badge-success"><span class="status-dot"></span> PICK UP WHERE YOU LEFT OFF</span><div class="welcome-document" aria-hidden="true"><i class="far fa-file-word"></i><span>your_next_file.docx</span><div class="paper-lines"><span></span><span></span><span></span></div></div><p>Progress saves in this browser session.<br>No account needed to get started.</p></div></div>
+          <div class="section-heading"><div><span class="eyebrow">CHOOSE YOUR STARTING POINT</span><h2>What are we making?</h2></div><span class="badge badge-muted">3 FILE MODES</span></div>
+          <div class="quickstart-grid">
+            <button class="quickstart-card" onclick="startNewProject('project')"><span class="quickstart-icon coral"><i class="far fa-folder-open" aria-hidden="true"></i></span><span class="quickstart-title">Project files</span><span class="quickstart-description">Turn your Frontend or DBMS project into a structured report with your facts and screenshots.</span><span class="quickstart-foot">FRONTEND / DBMS <i class="fas fa-arrow-right" aria-hidden="true"></i></span></button>
+            <button class="quickstart-card" onclick="startNewProject('lab')"><span class="quickstart-icon lavender"><i class="fas fa-code" aria-hidden="true"></i></span><span class="quickstart-title">Lab files</span><span class="quickstart-description">Theory, source code and sample output for programming practicals in your chosen language.</span><span class="quickstart-foot">C / C++ / PYTHON / JAVA / JS <i class="fas fa-arrow-right" aria-hidden="true"></i></span></button>
+            <button class="quickstart-card" onclick="startNewProject('custom')"><span class="quickstart-icon mint"><i class="fas fa-terminal" aria-hidden="true"></i></span><span class="quickstart-title">OS/CN/Custom files</span><span class="quickstart-description">Linux command steps, networking plans, or a mixed set of aims classified individually.</span><span class="quickstart-foot">LINUX / NETWORKS / MIXED <i class="fas fa-arrow-right" aria-hidden="true"></i></span></button>
+          </div>
+          <div class="overview-bottom"><section class="card"><div class="card-heading"><h3><i class="fas fa-clock-rotate-left" aria-hidden="true"></i> Your latest session</h3><span class="eyebrow">THIS BROWSER</span></div><div id="recent-sessions"></div></section><aside class="card workspace-tip"><span class="quickstart-icon coral"><i class="far fa-lightbulb" aria-hidden="true"></i></span><h3>A few good starting points.</h3><p>Have a syllabus? Import the PDF in Lab files.<br>Already built a project? Use the context collector.<br>Need a networking practical? CN needs no AI key.</p><a href="https://github.com/tanish19078/generateassignment#readme">Read the quick guide <i class="fas fa-arrow-right" aria-hidden="true"></i></a></aside></div>
+        </section>
+
+        <section id="view-setup" class="view" aria-label="File setup">
+          <div class="page-heading"><div><span class="eyebrow">01 / THE STARTING POINT</span><h1>Set up your file.</h1><p>Choose a format. Make it yours. We'll handle the structure.</p></div><span class="badge badge-muted">STEP 1 OF 5</span></div>
+          <div class="mode-grid" aria-label="Main file modes">
+            <button type="button" class="mode-card" data-mode="project" onclick="selectMainMode('project')" aria-pressed="false"><i class="far fa-folder-open" aria-hidden="true"></i><h4>Project files</h4><p>Frontend and DBMS reports from your repository facts and screenshots.</p><span>PROJECT REPORT <i class="fas fa-arrow-right" aria-hidden="true"></i></span></button>
+            <button type="button" class="mode-card" data-mode="lab" onclick="selectMainMode('lab')" aria-pressed="false"><i class="fas fa-code" aria-hidden="true"></i><h4>Lab files</h4><p>Programming practicals with explanations, code and sample output.</p><span>PROGRAMMING LAB <i class="fas fa-arrow-right" aria-hidden="true"></i></span></button>
+            <button type="button" class="mode-card" data-mode="custom" onclick="selectMainMode('custom')" aria-pressed="false"><i class="fas fa-terminal" aria-hidden="true"></i><h4>OS/CN/Custom files</h4><p>Linux commands, network experiments, or mixed aims detected individually.</p><span>OS / NETWORKS / MIXED <i class="fas fa-arrow-right" aria-hidden="true"></i></span></button>
+          </div>
+          <div class="setup-layout"><div class="setup-fields">
+            <section class="card" id="details-card"><div class="card-heading"><h3><i class="fas fa-sliders" aria-hidden="true"></i> File details</h3><span class="eyebrow" id="setupModeSummary">CHOOSE A MODE ABOVE</span></div>
+              <p id="setupEmptyHint" class="helper">Select a file mode to see its options. Your AI connection and document preferences are below.</p>
+              <div id="custom-file-options" class="field" style="display:none;"><label class="label" for="fileStyle">File type</label><select class="select" id="fileStyle" onchange="selectMode(this.value)"><option value="os">OS - Linux commands and terminal steps</option><option value="cn">CN - networking plans and diagrams (no API key)</option><option value="auto">Custom - auto-detect each aim and language</option></select></div>
+              <div id="mode-options" style="display:none;">
+                <div id="os-options" class="field" style="display:none;"><div class="form-grid"><div><label class="label" for="termUser">Terminal username</label><input class="input" id="termUser" value="student" placeholder="e.g. student"></div><div><label class="label" for="termHost">Hostname</label><input class="input" id="termHost" value="ubuntu" placeholder="e.g. ubuntu"></div></div></div>
+                <div id="cn-options" class="field" style="display:none;"><div class="cn-student-fields"><div><label class="label" for="cnName">Student name</label><input class="input" id="cnName" maxlength="100" autocomplete="name" placeholder="Your name"></div><div><label class="label" for="cnRoll">Roll number</label><input class="input" id="cnRoll" maxlength="100" placeholder="Your roll number"></div><div><label class="label" for="cnSection">Class / section (optional)</label><input class="input" id="cnSection" maxlength="100" placeholder="e.g. CSE 3A"></div></div><p class="helper">CN recipes include consistent configurations, diagrams and expected outputs. They don't run a simulator. Student details also apply to CN aims in a mixed batch.</p></div>
+                <div id="project-options" class="field" style="display:none;"><label class="label">Project report type</label><div class="project-submode-grid" role="radiogroup" aria-label="Project report type"><button type="button" class="project-submode-card" data-project-submode="frontend" onclick="selectProjectSubmode('frontend')" role="radio" aria-checked="false"><i class="far fa-window-maximize" aria-hidden="true"></i><span>Frontend</span><small>Architecture, methodology and screenshot-led results</small></button><button type="button" class="project-submode-card" data-project-submode="dbms" onclick="selectProjectSubmode('dbms')" role="radio" aria-checked="false"><i class="fas fa-database" aria-hidden="true"></i><span>DBMS</span><small>ERD, database schema and implemented SQL use cases</small></button></div><p class="helper">Bring facts from your existing project. Supplied prose is preserved; missing sections use your AI endpoint. Java project reports are not available yet.</p></div>
+                <div id="coding-options" class="field" style="display:none;"><label class="label" for="codeLang">Code language</label><select class="select" id="codeLang"><option value="c">C</option><option value="cpp">C++</option><option value="python">Python</option><option value="java">Java</option><option value="javascript">JavaScript</option></select><p class="helper">Used for Lab files. Custom mode detects explicitly named languages per aim.</p></div>
+              </div>
+            </section>
+            <section class="card" id="connection-card"><div class="card-heading"><h3><i class="fas fa-plug" aria-hidden="true"></i> AI connection</h3><span class="eyebrow">YOUR ENDPOINT. YOUR MODEL.</span></div>
+              <div id="model-options"><div class="field"><label class="label" for="apiEndpoint">API base URL (optional)</label><input class="input" id="apiEndpoint" type="url" placeholder="https://your-host/v1"><p class="helper">Leave blank for the server default. Otherwise, use an OpenAI-compatible endpoint.</p></div><div class="field"><label class="label" for="customModel">Model ID (optional)</label><input class="input" id="customModel" placeholder="Default: openai/gpt-oss-120b"><p class="helper">Enter the model supported by your custom endpoint, or use the configured server model.</p></div></div>
+              <div id="key-options" class="field"><label class="label" for="apiKey">API key</label><div class="password-field"><input class="input" id="apiKey" type="password" autocomplete="off" placeholder="Enter your API key"><button onclick="toggleApiKey()" aria-label="Toggle API key visibility"><i class="fas fa-eye" id="apiKeyEye" aria-hidden="true"></i></button></div><p class="helper">Leave blank to use the server key for its endpoint. Entered keys are saved in this browser.</p></div>
+              <label id="quality-options" class="check-row"><input id="jevQualityGate" type="checkbox"><span><strong>Optional quality review</strong><span class="helper">An advisory second look at lab content. Requires the server's Jev/OpenRouter configuration.</span></span></label>
+            </section>
+            <section class="card" id="formatting-shell"><button class="formatting-toggle" onclick="toggleCollapse('formatting-section')" aria-expanded="true" aria-controls="formatting-section"><span><i class="fas fa-font" aria-hidden="true"></i> Document formatting</span><i class="fas fa-chevron-down" id="formatting-chevron" aria-hidden="true"></i></button><div class="collapse-content open" id="formatting-section"><div class="form-grid"><div><label class="label" for="fmtFont">Font family</label><select class="select" id="fmtFont"><option>Times New Roman</option><option>Arial</option><option>Calibri</option><option>Consolas</option></select></div><div><label class="label" for="fmtHeading">Heading size (pt)</label><input class="input" type="number" id="fmtHeading" value="16" min="10" max="28"></div><div><label class="label" for="fmtBody">Body size (pt)</label><input class="input" type="number" id="fmtBody" value="12" min="8" max="20"></div><div><label class="label" for="fmtCode">Code size (pt)</label><input class="input" type="number" id="fmtCode" value="9" min="6" max="16"></div><div><label class="label" for="fmtImgW">Image width (%)</label><input class="input" type="number" id="fmtImgW" value="85" min="30" max="100"></div><div><label class="label" for="fmtTermW">Terminal width (%)</label><input class="input" type="number" id="fmtTermW" value="90" min="30" max="100"></div></div></div></section>
+          </div><aside class="setup-aside"><div class="card setup-preview"><div class="card-heading"><h3>Your document</h3><span class="badge badge-accent">.DOCX</span></div><div class="document-preview" aria-hidden="true"><span class="preview-running-head">PRACTICAL FILE</span><div class="preview-rule"></div><strong id="setupFileSummary">A clear, consistent format.</strong><p>Aim &amp; introduction</p><div class="preview-lines"><span></span><span></span><span></span></div><p>Procedure &amp; implementation</p><div class="preview-code"><span></span><span></span><span></span></div><div class="preview-page-number">1</div></div><p class="helper">Illustrative layout. Final sections depend on your selected file type.</p></div><div class="setup-next"><span class="status-dot"></span><strong id="setupStatusTitle">Ready when you are.</strong><p id="setupStatusText">Choose a file mode, then add your source material.</p><button class="btn btn-primary btn-lg btn-wide" id="setupProceedBtn" onclick="proceedToAims()"><span id="setupProceedLabel">Proceed to aims</span><i class="fas fa-arrow-right" aria-hidden="true"></i></button></div><p class="setup-footnote"><i class="far fa-bookmark" aria-hidden="true"></i> CN recipes and complete supplied project reports work without an AI key.</p></aside></div>
+        </section>
+
+        <section id="view-aims" class="view" aria-label="Source material">
+          <div id="standard-aims-panel"><div class="page-heading"><div><span class="eyebrow">02 / YOUR SOURCE MATERIAL</span><h1>Add your experiment aims.</h1><p>Paste a list, import a file, or start with a sample.</p></div><span class="badge badge-muted">STEP 2 OF 5</span></div>
+            <section class="card aims-card"><div class="card-heading"><h3><i class="far fa-file-lines" aria-hidden="true"></i> Experiment list</h3><div class="action-row"><button class="btn btn-secondary" onclick="importFile()"><i class="fas fa-file-import" aria-hidden="true"></i> Import .txt</button><button class="btn btn-secondary" onclick="loadSamples()"><i class="fas fa-flask" aria-hidden="true"></i> Load samples</button></div></div><input type="file" id="fileInput" accept=".txt" style="display:none;" onchange="handleFileImport(event)">
+              <label class="label" for="aimsEditor">Separate each aim with --- on its own line</label><div class="editor-window" id="editorWindow"><div class="editor-chrome"><div class="chrome-dot red"></div><div class="chrome-dot yellow"></div><div class="chrome-dot green"></div><span class="chrome-tab">AIMS_MANIFEST.TXT</span><span>PLAIN TEXT</span></div><div class="editor-body" id="editorBody"><div class="line-numbers" id="lineNumbers" aria-hidden="true">1</div><div class="editor-highlight" id="editorHighlight" aria-hidden="true"></div><textarea id="aimsEditor" spellcheck="false" placeholder="Write a program to implement binary search.&#10;---&#10;Write a program to sort a list using bubble sort.&#10;---&#10;Write a program to implement a stack."></textarea></div></div>
+              <div class="editor-toolbar"><div class="action-row"><button class="btn btn-ghost" onclick="importSyllabusPdf()"><i class="far fa-file-pdf" aria-hidden="true"></i> Import syllabus PDF</button><button class="btn btn-ghost" onclick="autoDetectAims()"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Detect file type</button></div><span class="badge badge-muted" id="aimCountBadge">0 experiments detected</span></div><input type="file" id="pdfInput" accept=".pdf" style="display:none;" onchange="handlePdfImport(event)">
+            </section><div class="view-actions"><button class="btn btn-secondary" onclick="navigate('setup')"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back to setup</button><button class="btn btn-primary btn-lg" id="startGenBtn" onclick="startGeneration()" disabled>Generate file <i class="fas fa-arrow-right" aria-hidden="true"></i></button></div>
+          </div>
+        <div id="project-file-panel" style="display:none;">
+          <div class="project-bridge-header">
+            <div>
+              <span class="badge badge-accent" id="projectSubmodeBadge">FRONTEND</span>
+              <h2>Build a verified context pack</h2>
+              <p>Run the collector in the AI session that already knows your project, then return its JSON here.</p>
+            </div>
+            <button class="btn btn-secondary" onclick="navigate('setup')"><i class="fas fa-sliders"></i> Change Type</button>
+          </div>
+
+          <div class="project-bridge-grid">
+            <section class="card project-stage-card">
+              <div class="project-stage-number">1</div>
+              <div class="project-stage-heading">
+                <h3>Send the collector prompt</h3>
+                <p>Paste this into Cursor, Claude, OpenCode, or another repository-aware session.</p>
+              </div>
+              <pre class="project-prompt" id="projectCollectorPrompt">Loading collector prompt...</pre>
+              <button class="btn btn-secondary" id="copyProjectPromptBtn" onclick="copyProjectPrompt()"><i class="fas fa-copy"></i> Copy Prompt</button>
+            </section>
+
+            <section class="card project-stage-card">
+              <div class="project-stage-number">2</div>
+              <div class="project-stage-heading">
+                <h3>Import compact project facts</h3>
+                <p>Paste the complete facts-only response or import its <code>.json</code> file. Long report prose is drafted here, one section at a time.</p>
+              </div>
+              <label class="label" for="projectContextInput">Complete project context JSON</label>
+              <textarea class="textarea project-context-input" id="projectContextInput" spellcheck="false" placeholder='{"schema_version":1,"submode":"frontend",...}'></textarea>
+              <p class="helper" id="projectContextSize">0 characters · limit 300,000</p>
+              <input type="file" id="projectContextFile" accept=".json,application/json" style="display:none;" onchange="handleProjectContextFile(event)">
+              <div class="project-action-row">
+                <button class="btn btn-secondary" onclick="document.getElementById('projectContextFile').click()"><i class="fas fa-file-import"></i> Import JSON</button>
+                <button class="btn btn-primary" id="validateProjectBtn" onclick="validateProjectContext()"><i class="fas fa-shield-halved"></i> Validate Context</button>
+              </div>
+              <div class="project-validation" id="projectValidationPanel" aria-live="polite">
+                <p id="projectValidationSummary">Validation has not run yet.</p>
+                <div id="projectValidationDetails"></div>
+              </div>
+            </section>
+          </div>
+
+          <section class="card project-screenshot-card">
+            <div>
+              <h3><i class="fas fa-images"></i> Report figures and screenshots</h3>
+              <p>Optional during generation, but required for screenshot-led results. PNG/JPEG files are resized locally and matched by filename from the context pack.</p>
+            </div>
+            <button type="button" class="btn btn-secondary" id="projectImageButton" onclick="document.getElementById('projectImageInput').click()"><i class="fas fa-upload"></i> Add Images</button>
+            <input type="file" id="projectImageInput" accept="image/png,image/jpeg" multiple style="display:none;" onchange="handleProjectImages(event)">
+            <div id="projectImageList" class="project-image-list"><span class="helper">No images selected.</span></div>
+          </section>
+
+          <div class="project-footer-actions">
+            <button class="btn btn-secondary" onclick="navigate('setup')"><i class="fas fa-arrow-left"></i> Back to Setup</button>
+            <button class="btn btn-primary btn-lg" id="projectGenerateBtn" onclick="startProjectGeneration()" disabled>
+              Build Project Report <i class="fas fa-file-lines"></i>
+            </button>
+          </div>
+        </div>
+        </section>
+
+        <section id="view-generation" class="view" aria-label="Generation progress">
+          <div class="page-heading"><div><span class="eyebrow">03 / TAKING SHAPE</span><h1>From inputs to a first draft.</h1><p>Your progress, one experiment or section at a time.</p></div><span class="badge badge-muted">STEP 3 OF 5</span></div>
+          <section class="card generation-summary"><div class="generation-heading"><div><h2 id="generationTitle">Generating your file <span class="spinner" id="genSpinner"></span></h2><p id="genSubtitle">Preparing your content...</p></div><div class="generation-numbers"><strong id="genPercent">0%</strong><p id="genCount">0 of 0</p></div></div><div class="progress-track" role="progressbar" aria-label="Generation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="generationProgressTrack"><div class="progress-fill" id="genProgress" style="width:0%;"></div></div></section>
+          <div class="generation-layout"><div id="expGrid"></div><section class="log-panel"><div class="log-heading"><div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div><h3>Generation log</h3><span>LIVE PROGRESS</span></div><div class="terminal" id="genTerminal" role="log" aria-live="polite"></div></section></div>
+          <div class="view-actions"><button class="btn btn-secondary" onclick="stopGeneration()"><i class="fas fa-arrow-left" aria-hidden="true"></i><span id="generationBackLabel">Modify aims</span></button><button class="btn btn-primary btn-lg" id="reviewBtn" style="display:none;" onclick="navigate('review')">Review results <i class="fas fa-arrow-right" aria-hidden="true"></i></button></div>
+        </section>
+        <section id="view-review" class="view" aria-label="Review content"><div class="page-heading"><div><span class="eyebrow">04 / THE FINAL LOOK</span><h1 id="reviewTitle">Review your results.</h1><p>Check the details, refine the content, and make it yours.</p></div><span class="badge badge-accent" id="reviewCountBadge">0 experiments ready</span></div><div id="reviewAccordion"></div><div class="view-actions"><button class="btn btn-secondary" onclick="navigate('aims')"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back to inputs</button><button class="btn btn-primary btn-lg" onclick="navigateStep('export')">Prepare download <i class="fas fa-arrow-right" aria-hidden="true"></i></button></div></section>
+        <section id="view-export" class="view" aria-label="Export document"><div class="page-heading"><div><span class="eyebrow">05 / READY TO TAKE WITH YOU</span><h1 id="exportTitle">Your finished file.</h1><p>An editable Word document. Ready for your final touches.</p></div><span class="badge badge-accent">WORD EXPORT</span></div><div class="export-layout"><div class="export-main"><section class="card"><div class="card-heading"><h3 id="artifactListTitle">Included in your document</h3><i class="far fa-file-word text-accent" aria-hidden="true"></i></div><div id="artifactList"></div><div class="artifact-summary"><span id="artifactTotal">0 experiments</span><span id="artifactSize">Estimated size</span></div>
+              <div id="projectExportImagePanel" class="project-export-images" style="display:none;"><div><strong>Required screenshots</strong><p id="projectExportImageStatus">No screenshots uploaded.</p></div><button type="button" class="btn btn-secondary" id="projectExportImageButton" onclick="document.getElementById('projectImageInput').click()"><i class="far fa-images" aria-hidden="true"></i> Add images</button><div id="projectExportImageList" class="project-image-list"></div></div>
+              <div id="downloadArea"><button class="download-btn" id="downloadBtn" onclick="downloadDocument()"><i class="fas fa-arrow-down" aria-hidden="true"></i> Download Word document</button><div id="downloadSuccess" style="display:none;" role="status"><i class="fas fa-circle-check" aria-hidden="true"></i><p>Document downloaded successfully.</p></div><p class="helper">Opens in Word, LibreOffice, and other .docx editors.</p></div></section><div class="view-actions"><button class="btn btn-secondary" onclick="navigate('review')"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back to review</button><button class="btn btn-ghost" onclick="navigate('dashboard')">Return to overview <i class="fas fa-arrow-right" aria-hidden="true"></i></button></div></div>
+            <aside class="export-aside"><section class="log-panel"><div class="log-heading"><div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div><h3>Export log</h3></div><div class="terminal" id="exportTerminal" role="log" aria-live="polite"></div></section><section class="card" id="classroom-panel"><div class="card-heading"><h3><i class="fas fa-users" aria-hidden="true"></i> Classroom files</h3><label class="switch" aria-label="Enable classroom export"><input type="checkbox" id="classroomToggle" onchange="toggleClassroom()"><span></span><span id="classroomKnob"></span></label></div><p class="helper">One set of aims. A separate variation for each student.</p><div id="classroomOptions" style="display:none;"><label class="label" for="studentCount">Number of students</label><input class="input" type="number" id="studentCount" value="2" min="2" max="12"><button class="btn btn-dark btn-wide" id="classroomBtn" onclick="downloadClassroomZip()"><i class="far fa-file-zipper" aria-hidden="true"></i> Download variations (ZIP)</button><p class="helper">Up to 12 students. Uses your AI connection to draft each variation.</p></div></section></aside>
+          </div></section>
+      </main>
+      <footer class="page-footer"><span><strong>PractiGen</strong> / Your work, well presented.</span><div class="footer-links"><a href="./">Home</a><a href="https://github.com/tanish19078/generateassignment">GitHub</a><a href="https://github.com/tanish19078/generateassignment#readme">Help &amp; docs</a></div></footer>
+    </div>
+  </div>
+  <div id="refine-modal" role="dialog" aria-modal="true" aria-labelledby="refineTitle"><div class="modal-backdrop" onclick="closeRefineModal()"></div><div class="modal-content"><div class="card-heading"><h3 id="refineTitle">A little refinement.</h3><button class="btn btn-ghost" onclick="closeRefineModal()" aria-label="Close refinement"><i class="fas fa-xmark" aria-hidden="true"></i></button></div><div class="refine-context"><span class="label">Current aim</span><p id="refineAim"></p></div><label class="label" for="refineInput">What would you like to change?</label><textarea class="textarea" id="refineInput" rows="4" placeholder="Describe what you want to improve..."></textarea><div class="refine-chips"><button class="chip" onclick="document.getElementById('refineInput').value='Add more comments to the code'">Add comments</button><button class="chip" onclick="document.getElementById('refineInput').value='Use different variable names'">Different variable names</button><button class="chip" onclick="document.getElementById('refineInput').value='Explain the logic better in theory'">Explain the logic</button><button class="chip" onclick="document.getElementById('refineInput').value='Add more test cases in the output'">More test cases</button></div><button class="btn btn-primary btn-wide" onclick="applyRefine()">Apply changes <i class="fas fa-arrow-right" aria-hidden="true"></i></button></div></div>
+  <div id="toast-container" role="status" aria-live="polite"></div><canvas id="confetti-canvas" aria-hidden="true"></canvas>
+</body>
+</html>

@@ -92,7 +92,7 @@ context.normalized = normalized;
 
 (async () => {
   run('init()');
-  const html = fs.readFileSync('public/index.html', 'utf8');
+  const html = fs.readFileSync('public/workspace.html', 'utf8');
   assert.equal((html.match(/class="mode-card"/g) || []).length, 3);
   assert.ok(!html.includes('provider-grid'));
   run("selectMainMode('lab')");
