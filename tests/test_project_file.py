@@ -232,7 +232,7 @@ def test_validate_rejects_mode_mismatch_and_missing_facts(client):
     short['report_sections']['abstract'] = 'A short abstract.'
     short['project']['results'].pop()
     data = client.post('/api/project/validate', json={'submode': 'frontend', 'context': short}).get_json()
-    assert 'abstract' in data['generation_needed']
+    assert 'abstract' not in data['generation_needed']
     assert any('10-15' in field for field in data['missing_fields'])
 
 
@@ -329,7 +329,7 @@ def test_hybrid_generation_only_completes_blank_sections(client, monkeypatch):
 def test_malformed_hybrid_output_is_a_gateway_error(client, monkeypatch):
     context = dbms_context()
     context['report_sections']['erd_description'] = ''
-    monkeypatch.setattr(app_module, 'run_completion', lambda *args, **kwargs: 'not json')
+    monkeypatch.setattr(app_module, 'run_completion', lambda *args, **kwargs: '{invalid json')
     response = generate_supplied(client, context)
     assert response.status_code == 502
     assert 'valid JSON' in response.get_json()['error']
@@ -438,3 +438,75 @@ def test_malformed_report_submode_and_bounded_gzip_are_client_errors(client, mon
     )
     assert response.status_code == 400
     assert 'too large after decompression' in response.get_json()['error'].lower()
+
+
+@pytest.mark.parametrize('submode,factory', [('frontend', frontend_context), ('dbms', dbms_context)])
+def test_compact_context_section_workflow_through_download(client, monkeypatch, submode, factory):
+    context = factory(with_sections=False)
+    context['report_sections'] = {}
+    calls = []
+    def completion(messages, *args, **kwargs):
+        calls.append(messages)
+        assert 'plain prose' in messages[0]['content']
+        assert '"report_sections"' not in messages[1]['content']
+        return prose('Verified project facts explain the implementation', 160)
+    monkeypatch.setattr(app_module, 'run_completion', completion)
+    validation = client.post('/api/project/validate', json={'submode': submode, 'context': context}).get_json()
+    assert validation['valid']
+    completed = {}
+    for field in validation['generation_needed']:
+        response = client.post('/api/project/section', json={
+            'submode': submode, 'context': validation['normalized'], 'section': field, 'api_key': 'test-key',
+        })
+        assert response.status_code == 200, response.get_json()
+        completed[field] = response.get_json()['text']
+    monkeypatch.setattr(app_module, 'run_completion', lambda *a, **k: pytest.fail('Assembly must not call an LLM'))
+    response = client.post('/api/project/generate', json={
+        'submode': submode, 'context': context, 'completed_sections': completed,
+    })
+    assert response.status_code == 200, response.get_json()
+    report = response.get_json()['report']
+    assert set(report['generation']['generated_fields']) == set(completed)
+    images = frontend_images(context) if submode == 'frontend' else [image_payload('erd.png', section='erd')]
+    download = client.post('/api/project/download', json={'submode': submode, 'report': report, 'images': images})
+    assert download.status_code == 200
+    assert len(Document(io.BytesIO(download.data)).inline_shapes) == len(images)
+
+
+def test_context_repairs_wrappers_trailing_commas_and_literal_newlines(client):
+    context = dbms_context(with_sections=False)
+    context['project']['summary'] = 'A quoted "title", } and a backslash \\ stay intact.'
+    raw = json.dumps(context, ensure_ascii=False, indent=2)
+    raw = raw.replace('PRIMARY KEY);\\nCREATE', 'PRIMARY KEY);\nCREATE')
+    raw = raw.rstrip()[:-1] + ',}'
+    response = client.post('/api/project/validate', json={'submode': 'dbms', 'context': '\ufeff```json\n' + raw + '\n```'})
+    result = response.get_json()
+    assert result['valid'], result['errors']
+    assert result['normalized']['project']['summary'] == context['project']['summary']
+    assert result['normalized']['dbms']['schema_sql'] == context['dbms']['schema_sql']
+
+
+def test_truncated_context_gives_recovery_instructions(client):
+    raw = json.dumps(frontend_context())[:-70]
+    result = client.post('/api/project/validate', json={'submode': 'frontend', 'context': raw}).get_json()
+    assert not result['valid']
+    assert 'line ' in result['errors'][0]
+    assert 'compact facts-only' in result['errors'][0]
+
+
+def test_supplied_short_section_is_not_replaced(client, monkeypatch):
+    context = frontend_context()
+    context['report_sections']['abstract'] = 'A concise supplied abstract.'
+    monkeypatch.setattr(app_module, 'run_completion', lambda *a, **k: pytest.fail('Supplied prose must be preserved'))
+    response = generate_supplied(client, context)
+    assert response.status_code == 200
+    assert response.get_json()['report']['report_sections']['abstract'] == 'A concise supplied abstract.'
+
+
+def test_section_requires_valid_field_and_rejects_incomplete_output(client, monkeypatch):
+    context = dbms_context(with_sections=False)
+    response = client.post('/api/project/section', json={'submode': 'dbms', 'context': context, 'section': 'sql'})
+    assert response.status_code == 400
+    monkeypatch.setattr(app_module, 'run_completion', lambda *a, **k: 'Too short.')
+    response = client.post('/api/project/section', json={'submode': 'dbms', 'context': context, 'section': 'introduction', 'api_key': 'test-key'})
+    assert response.status_code == 502

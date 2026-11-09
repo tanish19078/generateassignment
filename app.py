@@ -75,282 +75,113 @@ def read_download_payload():
         raise DownloadRequestError('Export payload is not valid JSON.') from err
 
 
+DEFAULT_MODEL = 'openai/gpt-oss-120b'
+DEFAULT_BASE_URL = 'https://api.groq.com/openai/v1'
 LLM_PROVIDERS = {
-    'groq': {
-        'label': 'Groq',
-        'base_url': 'https://api.groq.com/openai/v1',
-        'env_vars': ['GROQ_API_KEY'],
-        'api_format': 'openai',
-        'requires_key': True,
-    },
-    'cerebras': {
-        'label': 'Cerebras',
-        'base_url': 'https://api.cerebras.ai/v1',
-        'env_vars': ['CEREBRAS_API_KEY'],
-        'api_format': 'openai',
-        'requires_key': True,
-    },
+    'groq': {'label': 'Default endpoint', 'base_url': DEFAULT_BASE_URL,
+             'env_vars': ['LLM_API_KEY', 'GROQ_API_KEY'], 'requires_key': True},
 }
 
 
-def get_env_values(env_names):
-    values = []
+class LLMConfigurationError(ValueError):
+    pass
 
-    for env_name in env_names:
-        value = os.getenv(env_name)
-        if value:
-            values.append(value)
 
-    env_path = os.path.join(os.path.dirname(__file__), '.env')
-    if os.path.exists(env_path):
-        try:
-            with open(env_path, 'r', encoding='utf-8') as env_file:
-                for line in env_file:
-                    stripped = line.strip()
-                    if not stripped or stripped.startswith('#') or '=' not in stripped:
-                        continue
-
-                    key, value = stripped.split('=', 1)
-                    if key.strip() in env_names and value.strip():
-                        values.append(value.strip().strip('"').strip("'"))
-        except OSError:
-            pass
-
-    deduped = []
-    for value in values:
-        if value not in deduped:
-            deduped.append(value)
-
-    return deduped
+@app.errorhandler(LLMConfigurationError)
+def llm_configuration_error(error):
+    return jsonify({'error': str(error)}), 400
 
 
 def get_provider_keys(provider_config, submitted_key):
-    env_keys = get_env_values(provider_config.get('env_vars', []))
+    # A submitted key is scoped to this request; never silently change credentials.
     if submitted_key:
-        return [submitted_key] + [key for key in env_keys if key != submitted_key]
+        return [submitted_key]
+    return list(dict.fromkeys(os.getenv(name, '').strip()
+                for name in provider_config.get('env_vars', []) if os.getenv(name, '').strip()))
 
-    return env_keys
+
+def normalize_endpoint(value):
+    from urllib.parse import urlsplit
+    value = str(value or '').strip().rstrip('/')
+    parsed = urlsplit(value)
+    local = parsed.hostname in ('localhost', '127.0.0.1', '::1') and not os.getenv('VERCEL')
+    if (not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment
+            or (parsed.scheme != 'https' and not (parsed.scheme == 'http' and local))):
+        raise LLMConfigurationError('Use an HTTPS API base URL (for example https://host/v1). '
+                                    'HTTP localhost endpoints work in local development only.')
+    if value.endswith('/chat/completions'):
+        value = value[:-len('/chat/completions')]
+    return value
+
+
+def resolve_llm_config(data):
+    configured_url = normalize_endpoint(os.getenv('LLM_BASE_URL') or DEFAULT_BASE_URL)
+    endpoint = normalize_endpoint(data.get('base_url') or configured_url)
+    custom = endpoint != DEFAULT_BASE_URL
+    # Legacy provider IDs are rejected explicitly rather than sending their key to Groq.
+    if data.get('provider') not in (None, '', 'groq', 'custom'):
+        raise LLMConfigurationError('Provider presets were removed. Enter its API base URL and model ID.')
+    server_model = os.getenv('LLM_MODEL') if endpoint == configured_url else ''
+    model = str(data.get('model') or server_model or ('' if custom else DEFAULT_MODEL)).strip()
+    if not model:
+        raise LLMConfigurationError('Enter a model ID for the custom endpoint.')
+    config = {'label': 'Custom endpoint' if custom else 'Default endpoint', 'base_url': endpoint,
+              'requires_key': not (endpoint.startswith('http://')), 'env_vars': []}
+    if endpoint == configured_url:
+        config['env_vars'] = ['LLM_API_KEY'] + (['GROQ_API_KEY'] if not custom else [])
+    keys = get_provider_keys(config, str(data.get('api_key') or '').strip())
+    if config['requires_key'] and not keys:
+        raise LLMConfigurationError('Enter an API key for this endpoint or configure LLM_API_KEY on the server.')
+    return ('custom' if custom else 'groq'), model, config, keys
 
 
 def parse_openai_chat_response(provider_config, body):
-    parsed = json.loads(body)
     try:
-        return parsed['choices'][0]['message']['content']
-    except (KeyError, IndexError, TypeError) as err:
-        raise ValueError(f"Malformed {provider_config['label']} response: {body[:500]}") from err
-
-
-def parse_anthropic_message_response(provider_config, body):
-    parsed = json.loads(body)
-    content = parsed.get('content')
-
-    if isinstance(content, str):
+        parsed = json.loads(body)
+        choice = parsed['choices'][0]
+        if choice.get('finish_reason') == 'length':
+            raise ValueError('The model response was cut off. Increase the endpoint output limit and retry.')
+        content = choice['message']['content']
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError('The model returned no text. Retry with a text generation model.')
         return content
-
-    if isinstance(content, list):
-        text_blocks = []
-        for block in content:
-            if isinstance(block, str):
-                text_blocks.append(block)
-            elif isinstance(block, dict) and block.get('text'):
-                text_blocks.append(block['text'])
-
-        if text_blocks:
-            return '\n'.join(text_blocks)
-
-    try:
-        return parsed['choices'][0]['message']['content']
-    except (KeyError, IndexError, TypeError) as err:
-        raise ValueError(f"Malformed {provider_config['label']} response: {body[:500]}") from err
-
-
-def build_anthropic_payload(provider_config, model, messages, temperature=0.7, top_p=0.9):
-    system_parts = []
-    anthropic_messages = []
-
-    for message in messages:
-        role = message.get('role', 'user')
-        content = message.get('content', '')
-
-        if role == 'system':
-            system_parts.append(content)
-            continue
-
-        if role not in ('user', 'assistant'):
-            role = 'user'
-
-        anthropic_messages.append({
-            'role': role,
-            'content': content,
-        })
-
-    payload = {
-        'model': model,
-        'max_tokens': provider_config.get('max_tokens', 4096),
-        'messages': anthropic_messages or [{'role': 'user', 'content': ''}],
-        'temperature': temperature,
-        'top_p': top_p,
-    }
-
-    if system_parts:
-        payload['system'] = '\n\n'.join(system_parts)
-
-    return payload
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as err:
+        raise ValueError('The endpoint did not return an OpenAI-compatible chat completion.') from err
 
 
 def create_chat_completion(provider_key, api_key, model, messages, temperature=0.7, top_p=0.9):
-    provider_config = LLM_PROVIDERS.get(provider_key)
-    if not provider_config:
-        raise ValueError(f"Unsupported LLM provider: {provider_key}")
-
-    if provider_config.get('requires_key') and not api_key:
-        env_hint = ' or '.join(provider_config.get('env_vars', []))
-        raise ValueError(f"{provider_config['label']} API key not found. Enter a key or set {env_hint}.")
-
-    api_format = provider_config.get('api_format', 'openai')
-    if api_format == 'anthropic':
-        url = provider_config['base_url'].rstrip('/') + '/messages'
-        payload = build_anthropic_payload(provider_config, model, messages, temperature=temperature, top_p=top_p)
-    else:
-        url = provider_config['base_url'].rstrip('/') + '/chat/completions'
-        payload = {
-            'model': model,
-            'messages': messages,
-            'temperature': temperature,
-            'top_p': top_p,
-        }
-
-    headers = {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'PractiGen/5.2',
-    }
-    if api_key and api_format == 'anthropic':
-        headers['x-api-key'] = api_key
-        headers['anthropic-version'] = provider_config.get('anthropic_version', '2023-06-01')
-    elif api_key:
+    config = provider_key if isinstance(provider_key, dict) else LLM_PROVIDERS[provider_key]
+    payload = {'model': model, 'messages': messages, 'temperature': temperature, 'top_p': top_p}
+    headers = {'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'PractiGen/6'}
+    if api_key:
         headers['Authorization'] = f'Bearer {api_key}'
-
-    req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
+    req = urllib.request.Request(config['base_url'] + '/chat/completions',
+                                 data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
+    class NoEndpointRedirects(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            # Credentials must never follow a redirect to a different endpoint.
+            return None
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as response:
+        opener = urllib.request.build_opener(NoEndpointRedirects())
+        with opener.open(req, timeout=45) as response:
             body = response.read().decode('utf-8')
     except urllib.error.HTTPError as err:
-        body = err.read().decode('utf-8', errors='replace')
-        raise RuntimeError(f"{provider_config['label']} API error {err.code}: {body}") from err
+        # Do not echo provider bodies, which can contain credentials or private prompts.
+        raise RuntimeError(f"{config['label']} API error {err.code}. Check the endpoint, model and key; retry if rate limited.") from err
     except urllib.error.URLError as err:
-        raise RuntimeError(f"{provider_config['label']} API connection error: {err.reason}") from err
-
-    if api_format == 'anthropic':
-        return parse_anthropic_message_response(provider_config, body)
-
-    return parse_openai_chat_response(provider_config, body)
-
-
-# ==================== SHARED COMPLETION RUNNER ====================
-def build_provider_attempts(provider, model, provider_config, api_keys):
-    """Build the ordered list of (provider, model, keys) attempts including fallbacks."""
-    attempts = [{
-        'provider': provider,
-        'model': model,
-        'config': provider_config,
-        'keys': api_keys,
-    }]
-
-    if provider == 'cerebras':
-        groq_config = LLM_PROVIDERS['groq']
-        attempts.append({
-            'provider': 'groq',
-            'model': 'llama-3.3-70b-versatile',
-            'config': groq_config,
-            'keys': get_provider_keys(groq_config, ''),
-        })
-
-    return attempts
+        raise RuntimeError(f"{config['label']} connection failed. Check the endpoint and try again.") from err
+    return parse_openai_chat_response(config, body)
 
 
 def run_completion(messages, provider, model, provider_config, api_keys, temperature=0.7, top_p=0.9):
-    """Run a chat completion across provider attempts with key rotation, backoff and fallback.
-
-    Returns the response text, or raises the last error. Replaces the fragile
-    `'text' in locals()` pattern with an explicit sentinel.
-    """
-    provider_attempts = build_provider_attempts(provider, model, provider_config, api_keys)
-
-    result_text = None
-    last_error = None
-    max_retries = 3
-
-    for attempt in range(max_retries + 1):
-        for provider_attempt in provider_attempts:
-            attempt_provider = provider_attempt['provider']
-            attempt_model = provider_attempt['model']
-            attempt_config = provider_attempt['config']
-            attempt_keys = provider_attempt['keys']
-
-            for key_index, selected_key in enumerate(attempt_keys or ['']):
-                try:
-                    result_text = create_chat_completion(
-                        attempt_provider,
-                        selected_key,
-                        model=attempt_model,
-                        messages=messages,
-                        temperature=temperature,
-                        top_p=top_p,
-                    )
-                    break
-                except Exception as api_err:
-                    last_error = api_err
-                    err_str = str(api_err)
-                    is_rate_limited = '429' in err_str or 'rate' in err_str.lower()
-                    is_bad_key = (
-                        '401' in err_str
-                        or 'invalid api key' in err_str.lower()
-                        or 'expired_api_key' in err_str.lower()
-                        or 'authentication' in err_str.lower()
-                    )
-                    is_invalid_model = (
-                        'invalid_request' in err_str.lower()
-                        and 'model' in err_str.lower()
-                    ) or '暂未开放' in err_str
-                    has_backup_key = key_index < len(attempt_keys) - 1
-
-                    if (is_rate_limited or is_bad_key) and has_backup_key:
-                        print(f"{attempt_config['label']} key {key_index + 1} failed. Trying backup key...")
-                        continue
-
-                    if is_invalid_model and provider_attempt is not provider_attempts[-1]:
-                        print(f"{attempt_config['label']} model {attempt_model} failed. Trying fallback model...")
-                        break
-
-                    if is_rate_limited and provider_attempt is not provider_attempts[-1]:
-                        print(f"{attempt_config['label']} is busy. Falling back to {provider_attempts[-1]['config']['label']}...")
-                        break
-
-                    if is_rate_limited and attempt < max_retries:
-                        wait_time = 15 * (2 ** attempt)  # 15s, 30s, 60s
-                        print(f"Rate limited. Waiting {wait_time}s before retry {attempt + 1}/{max_retries}...")
-                        time.sleep(wait_time)
-                        break
-
-                    raise
-
-            if result_text is not None:
-                break
-
-        if result_text is not None:
-            break
-
-    if result_text is None:
-        raise RuntimeError(
-            f"All provider attempts exhausted without a response. Last error: {last_error}"
-        )
-
-    return result_text
+    # One bounded request fits the serverless deadline. The UI owns visible retries.
+    # Keep request-specific endpoint configuration out of shared globals.
+    target = provider_config if provider == 'custom' else provider
+    return create_chat_completion(target, (api_keys or [''])[0], model, messages,
+                                  temperature=temperature, top_p=top_p)
 
 
-# ==================== RESPONSE PARSING & VALIDATION ====================
 def extract_section(tag, text):
     """Extract a [TAG] section from an LLM response. Returns None when the tag is absent."""
     text = text or ''
@@ -866,7 +697,7 @@ def api_project_prompt(submode):
             'prompt': build_collector_prompt(submode),
             'report_format': get_project_report_format(submode),
         })
-    except ProjectContextError as err:
+    except (ProjectContextError, LLMConfigurationError) as err:
         return jsonify({'error': str(err)}), 400
 
 
@@ -880,6 +711,7 @@ def api_project_validate():
     return jsonify(result)
 
 
+@app.route('/api/project/section', methods=['POST'])
 @app.route('/api/project/generate', methods=['POST'])
 def api_project_generate():
     try:
@@ -898,25 +730,34 @@ def api_project_generate():
         context = validation['normalized']
         missing = validation['generation_needed']
         generated = {}
-        if missing:
-            provider = str(data.get('provider') or 'groq').strip().lower()
-            model = str(data.get('model') or 'llama-3.3-70b-versatile').strip()
-            provider_config = LLM_PROVIDERS.get(provider)
-            if not provider_config:
-                raise ProjectContextError(f'Unsupported LLM provider: {provider}')
-            keys = get_provider_keys(provider_config, str(data.get('api_key') or '').strip())
-            if provider_config.get('requires_key') and not keys:
-                env_hint = ' or '.join(provider_config.get('env_vars', []))
-                raise ProjectContextError(
-                    f"{provider_config['label']} API key is required to complete blank report sections. "
-                    f'Enter a key or set {env_hint}.'
-                )
-            messages = build_project_generation_messages(context, missing)
-            text = run_completion(
-                messages, provider, model, provider_config, keys,
-                temperature=0.25, top_p=0.9,
-            )
-            generated = parse_project_generated_sections(text, missing)
+        completed = data.get('completed_sections', {})
+        if not isinstance(completed, dict):
+            raise ProjectContextError('completed_sections must be an object.')
+        for field in missing:
+            if field in completed:
+                generated.update(parse_project_generated_sections(
+                    json.dumps({'report_sections': {field: completed[field]}}), [field]))
+
+        if request.path.endswith('/section'):
+            field = data.get('section')
+            if not isinstance(field, str) or field not in context['report_sections']:
+                raise ProjectContextError('Choose a valid report section to generate.')
+            if context['report_sections'][field]:
+                return jsonify({'section': field, 'text': context['report_sections'][field]})
+            requested = [field]
+        else:
+            requested = [field for field in missing if field not in generated]
+            if len(requested) > 1:
+                return jsonify({'error': 'Generate missing sections individually, then assemble the report.',
+                                'generation_needed': requested}), 400
+        if requested:
+            provider, model, provider_config, keys = resolve_llm_config(data)
+            messages = build_project_generation_messages(context, requested)
+            text = run_completion(messages, provider, model, provider_config, keys,
+                                  temperature=0.25, top_p=0.9)
+            generated.update(parse_project_generated_sections(text, requested))
+        if request.path.endswith('/section'):
+            return jsonify({'section': field, 'text': generated[field]})
 
         report = build_project_report(context, generated, missing)
         return jsonify({
@@ -924,7 +765,7 @@ def api_project_generate():
             'warnings': validation['warnings'],
             'generated_sections': missing,
         })
-    except ProjectContextError as err:
+    except (ProjectContextError, LLMConfigurationError) as err:
         return jsonify({'error': str(err)}), 400
     except ProjectGenerationError as err:
         return jsonify({'error': str(err)}), 502
@@ -990,6 +831,8 @@ def api_parse():
         aims = [b.strip() for b in aim_blocks if b.strip()]
 
         return jsonify({'aims': aims})
+    except LLMConfigurationError:
+        raise
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1068,9 +911,6 @@ def api_generate():
     try:
         data = request.get_json()
         aim = data.get('aim', '')
-        api_key = data.get('api_key', '')
-        provider = data.get('provider', 'groq')
-        model = data.get('model', 'llama-3.3-70b-versatile')
         mode = data.get('mode', 'general')
         if mode == 'coding':  # frontend label → backend language-locked mode
             mode = 'general'
@@ -1100,10 +940,7 @@ def api_generate():
         if not terminal_host.strip():
             terminal_host = 'kali'
 
-        selected_provider_config = LLM_PROVIDERS.get(provider)
-        if not selected_provider_config:
-            raise ValueError(f"Unsupported LLM provider: {provider}")
-        selected_api_keys = get_provider_keys(selected_provider_config, api_key)
+        provider, model, selected_provider_config, selected_api_keys = resolve_llm_config(data)
 
         messages = build_messages(
             mode, aim, target_language, terminal_user, terminal_host, variation_seed
@@ -1154,6 +991,8 @@ def api_generate():
         return jsonify(result)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
+    except LLMConfigurationError:
+        raise
     except Exception as e:
         error_msg = str(e)
         status_code = 500
@@ -1225,9 +1064,6 @@ def api_refine():
         existing_concept = data.get('existing_concept', '')
         existing_output = data.get('existing_output', '')
 
-        api_key = data.get('api_key', '')
-        provider = data.get('provider', 'groq')
-        model = data.get('model', 'llama-3.3-70b-versatile')
         mode = data.get('mode', 'general')
         if mode == 'coding':
             mode = 'general'
@@ -1236,10 +1072,7 @@ def api_refine():
         terminal_user = (data.get('terminal_user') or 'student').strip() or 'student'
         terminal_host = (data.get('terminal_host') or 'kali').strip() or 'kali'
 
-        selected_provider_config = LLM_PROVIDERS.get(provider)
-        if not selected_provider_config:
-            raise ValueError(f"Unsupported LLM provider: {provider}")
-        selected_api_keys = get_provider_keys(selected_provider_config, api_key)
+        provider, model, selected_provider_config, selected_api_keys = resolve_llm_config(data)
 
         messages = build_refine_messages(
             mode, aim, change_request, existing_concept, existing_code, existing_output,
@@ -1256,6 +1089,8 @@ def api_refine():
         validate_generation_result(mode, result.get('code'), result.get('concept'))
         result['aim'] = aim  # preserve the original aim, not the change request
         return jsonify(result)
+    except LLMConfigurationError:
+        raise
     except Exception as e:
         error_msg = str(e)
         status_code = 500
@@ -1283,6 +1118,8 @@ def api_detect():
             for aim in aims
         ]
         return jsonify({'detections': detections})
+    except LLMConfigurationError:
+        raise
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1315,14 +1152,7 @@ def api_extract_aims():
         # Truncate to keep the LLM prompt within sane limits.
         raw_text = raw_text[:12000]
 
-        api_key = request.form.get('api_key', '')
-        provider = request.form.get('provider', 'groq')
-        model = request.form.get('model', 'llama-3.3-70b-versatile')
-
-        selected_provider_config = LLM_PROVIDERS.get(provider)
-        if not selected_provider_config:
-            return jsonify({'error': f'Unsupported LLM provider: {provider}'}), 400
-        selected_api_keys = get_provider_keys(selected_provider_config, api_key)
+        provider, model, selected_provider_config, selected_api_keys = resolve_llm_config(request.form)
 
         messages = [
             {'role': 'system', 'content': (
@@ -1347,6 +1177,8 @@ def api_extract_aims():
             aims = [line.strip(' \t\r\n-•.') for line in text.splitlines() if len(line.strip()) > 8]
 
         return jsonify({'aims': aims, 'text': '\n---\n'.join(aims)})
+    except LLMConfigurationError:
+        raise
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1748,6 +1580,8 @@ def api_download():
         )
     except (DownloadRequestError, ValueError) as e:
         return jsonify({'error': str(e)}), 400
+    except LLMConfigurationError:
+        raise
     except Exception as e:
         print(f"CRITICAL EXPORT ERROR: {traceback.format_exc()}")
         return jsonify({'error': f'Export Pipeline Fault: {str(e)}'}), 500
@@ -1797,6 +1631,8 @@ def api_classroom_zip():
         )
     except (DownloadRequestError, ValueError) as e:
         return jsonify({'error': str(e)}), 400
+    except LLMConfigurationError:
+        raise
     except Exception as e:
         print(f"CRITICAL CLASSROOM EXPORT ERROR: {traceback.format_exc()}")
         return jsonify({'error': f'Classroom Export Fault: {str(e)}'}), 500

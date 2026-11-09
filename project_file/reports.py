@@ -109,10 +109,8 @@ def _minimum_section_words(field):
 
 
 def _section_is_complete(field, value):
-    return (
-        len(value or '') >= MIN_SECTION_CHARS
-        and len(str(value).split()) >= _minimum_section_words(field)
-    )
+    # Word counts are writing guidance, not a reason to discard supplied prose.
+    return bool(str(value or '').strip())
 
 
 def _created_table_names(sql):
@@ -202,7 +200,7 @@ def _extract_json(raw):
     if len(raw) > MAX_CONTEXT_CHARS:
         raise ProjectContextError(f'Context exceeds the {MAX_CONTEXT_CHARS:,}-character limit.')
 
-    text = raw.strip()
+    text = raw.lstrip('\ufeff').strip()
     marker_match = re.search(
         r'PROJECT_CONTEXT_START\s*(.*?)\s*PROJECT_CONTEXT_END', text, re.DOTALL | re.IGNORECASE,
     )
@@ -213,15 +211,24 @@ def _extract_json(raw):
         text = re.sub(r'\s*```$', '', text, count=1)
 
     start = text.find('{')
-    end = text.rfind('}')
-    if start < 0 or end < start:
+    if start < 0:
         raise ProjectContextError('No JSON object was found in the pasted response.')
+    text = text[start:]
+    # Remove trailing commas outside strings only. SQL, quotes and backslashes
+    # inside values must never be rewritten or guessed.
+    text = re.sub(r'("(?:\\.|[^"\\])*"\s*)|,\s*(?=[}\]])',
+                  lambda match: match.group(1) or '', text, flags=re.DOTALL)
     try:
-        parsed = json.loads(text[start:end + 1])
+        parsed, end = json.JSONDecoder(strict=False).raw_decode(text)
     except json.JSONDecodeError as err:
         raise ProjectContextError(
-            f'Context JSON is invalid at line {err.lineno}, column {err.colno}: {err.msg}'
+            f'Context JSON is invalid at line {err.lineno}, column {err.colno}: {err.msg}. '
+            'The response may be cut off or contain an unescaped quote/backslash. '
+            'Request the compact facts-only context again, or import the complete .json file. '
+            'Do not paste a partial response.'
         ) from err
+    if text[end:].strip().startswith(('{', ',')):
+        raise ProjectContextError('Multiple JSON objects found. Import one complete context pack at a time.')
     if not isinstance(parsed, dict):
         raise ProjectContextError('The context JSON root must be an object.')
     return parsed
@@ -790,7 +797,7 @@ FRONTEND-SPECIFIC WORK:
 - Create 10-15 evidence-based Results entries. Each entry must describe a distinct visible page, state, workflow or test outcome and must name its corresponding screenshot.
 - Set every screenshot_filename to a unique, exact image filename the user will later upload. Do not fabricate image data or claim a screenshot exists.
 - For extra figures, use only "design" or "results" as the figures[].section value.
-- report_sections should contain formal, report-ready prose when the repository supports it: abstract (200-300 words), introduction_background (700-1100), introduction_significance (250-450), problem_definition (400-700), design_methodology (800-1300), and results_summary (250-500). Leave a field empty rather than inventing facts.
+- Leave report_sections empty. PractiGen writes the report one section at a time after import.
 """
     else:
         template = _dbms_template()
@@ -802,7 +809,7 @@ DBMS-SPECIFIC WORK:
 - Define meaningful use cases from implemented queries. Every use case needs a precise problem statement, SQL, concepts covered, an honest output description, and an optional screenshot filename.
 - Never claim SQL was executed unless this session actually executed it successfully. Mark unexecuted outputs as expected.
 - Declare an ERD image with figures[].section set to "erd". Use "use_case" for any additional SQL output figure.
-- report_sections should contain formal, report-ready prose when supported: introduction (500-900 words), erd_description (300-600), schema_description (300-600), and use_cases_introduction (150-300). Leave a field empty rather than inventing facts.
+- Leave report_sections empty. PractiGen writes the report one section at a time after import.
 """
 
     schema = json.dumps(template, indent=2, ensure_ascii=True)
@@ -815,8 +822,9 @@ OPERATING RULES:
 4. Inspect relevant README/documentation, manifests, source files, configuration, tests, and deployment files. Ignore dependency/vendor/build-output directories.
 5. Use empty strings or empty arrays for unknown optional values and explain unresolved facts in missing_information.
 6. Add concise repository paths to evidence. Do not paste entire source files.
-7. Keep supplied report prose formal and academic, but grounded in verified facts. PractiGen can complete blank prose later; factual structures must be complete here.
+7. Return compact facts only: keep descriptions to 1-2 sentences, omit unused optional keys and empty template records, and leave report_sections as {{}}. Aim for under 12,000 characters for Frontend or 24,000 for DBMS; never truncate required facts or SQL to meet that target. Do not include report-length prose or repeat result images in figures.
 8. Return exactly one valid JSON object matching schema_version {SCHEMA_VERSION}. Do not wrap it in Markdown fences and do not add commentary before or after it.
+9. Escape newlines as \\n, quotes as \\" and backslashes as \\\\ inside JSON strings, especially SQL. Close every string, array and object. If the response is too large, reduce optional descriptions before returning it; never split the object across messages.
 {mode_rules}
 REPORT CONVENTIONS:
 - Times New Roman; heading 16 pt bold left; subheading 14 pt bold left; body 12 pt justified with 1.5 spacing.
@@ -855,20 +863,24 @@ def build_generation_messages(context, missing_fields):
         'use_cases_introduction': '150-300 words',
     }
     requested = '\n'.join(f'- {field}: {targets[field]}' for field in missing_fields)
-    facts = json.dumps(context, ensure_ascii=True, separators=(',', ':'))
+    facts_context = {key: value for key, value in context.items() if key != 'report_sections'}
+    facts = json.dumps(facts_context, ensure_ascii=False, separators=(',', ':'))
     system = (
         'You complete missing academic report prose from a validated project context pack. '
         'Use only supplied facts. Never invent implementation details, screenshots, execution results, '
         'references, entities, SQL, test outcomes, student details, or measurements. Preserve an honest '
-        'boundary between observed and expected behaviour. Return valid JSON only.'
+        'boundary between observed and expected behaviour. '
+        + ('Return only the requested section as plain prose, without JSON or Markdown fences.'
+           if len(missing_fields) == 1 else 'Return valid JSON only.')
     )
-    user = f"""Complete only these blank or undersized report_sections fields:
+    output_shape = ('Return the section as plain prose. Do not wrap it in JSON.' if len(missing_fields) == 1
+                    else 'Return exactly: ' + json.dumps({'report_sections': {field: '...' for field in missing_fields}}))
+    user = f"""Complete only these blank report_sections fields:
 {requested}
 
 Use formal third-person academic prose. Avoid generic filler, repeated conclusions, Markdown headings, and unsupported claims. The structured objectives, requirements, entities, tables, use cases, and results will be rendered separately, so complement rather than duplicate them.
 
-Return exactly:
-{{"report_sections":{{{','.join(json.dumps(field) + ':"..."' for field in missing_fields)}}}}}
+{output_shape}
 
 VALIDATED CONTEXT:
 {facts}
@@ -877,6 +889,13 @@ VALIDATED CONTEXT:
 
 
 def parse_generated_sections(text, requested_fields):
+    if len(requested_fields) == 1 and isinstance(text, str) and not text.lstrip().startswith(('{', '```')):
+        field = requested_fields[0]
+        errors = []
+        value = _clean_text(text, f'report_sections.{field}', errors, MAX_SECTION_CHARS)
+        if errors or len(value) < MIN_SECTION_CHARS:
+            raise ProjectGenerationError('The model returned an empty or incomplete section. Retry this section.')
+        return {field: value}
     try:
         parsed = _extract_json(text)
     except ProjectContextError as err:
@@ -890,9 +909,9 @@ def parse_generated_sections(text, requested_fields):
     for field in requested_fields:
         value = _clean_text(sections.get(field), f'report_sections.{field}', errors, MAX_SECTION_CHARS)
         minimum_words = _minimum_section_words(field)
-        if not _section_is_complete(field, value):
+        if len(value) < MIN_SECTION_CHARS:
             errors.append(
-                f'report_sections.{field} must contain at least {minimum_words} words.'
+                f'report_sections.{field} is empty or incomplete. Retry this section.'
             )
         result[field] = value
     if errors:
