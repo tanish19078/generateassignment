@@ -15,6 +15,7 @@ function createEmptyProjectFileState() {
       status: 'idle', errors: [], missingFields: [], warnings: [], generationNeeded: []
     },
     report: null,
+    completedSections: {},
     images: [],
     generationStatus: 'idle'
   };
@@ -26,7 +27,7 @@ function createEmptyProjectFileState() {
 const state = {
   currentView: 'dashboard',
   currentStep: 0,
-  config: { mode: null, projectSubmode: null, provider: null, apiKey: '', termUser: 'student', termHost: 'ubuntu', codeLang: 'c', jevQualityGate: false },
+  config: { mode: null, mainMode: null, projectSubmode: null, baseUrl: '', model: '', apiKey: '', termUser: 'student', termHost: 'ubuntu', codeLang: 'c', jevQualityGate: false },
   aimsText: '',
   experiments: [],
   logs: [],
@@ -41,46 +42,6 @@ const state = {
 /* ============================
    DATA
    ============================ */
-// Curated picker. Only first-party inference APIs — Groq and Cerebras.
-// `tag` drives the pill on each card; 'preview' models are evaluation-only
-// upstream and may be withdrawn at short notice.
-const models = [
-  {
-    id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B', provider: 'groq', providerLabel: 'Groq',
-    desc: 'Best all-round quality for code and theory', meta: '131K context', tag: 'Recommended',
-  },
-  {
-    id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B', provider: 'groq', providerLabel: 'Groq',
-    desc: 'Same family, far cheaper — good for big batches', meta: '131K context', tag: 'Fastest',
-  },
-  {
-    id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B', provider: 'groq', providerLabel: 'Groq',
-    desc: 'Dependable general-purpose writer', meta: '131K context',
-  },
-  {
-    id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B', provider: 'groq', providerLabel: 'Groq',
-    desc: 'Lightest option; theory can come out thin', meta: '131K context',
-  },
-  {
-    id: 'qwen/qwen3.8-27b', name: 'Qwen 3.8 27B', provider: 'groq', providerLabel: 'Groq',
-    desc: 'Strong on structured code output', meta: '131K context', tag: 'Preview',
-  },
-  {
-    id: 'minimaxai/minimax-m2.7', name: 'MiniMax M2.7', provider: 'groq', providerLabel: 'Groq',
-    desc: 'Widest context — useful for very long labs', meta: '196K context', tag: 'Preview',
-  },
-  {
-    id: 'gpt-oss-120b', name: 'GPT-OSS 120B', provider: 'cerebras', providerLabel: 'Cerebras',
-    desc: 'Same model, roughly 3000 tokens/sec', meta: '131K context', tag: 'Fastest',
-  },
-  {
-    id: 'qwen-3.8-27b', name: 'Qwen 3.8 27B', provider: 'cerebras', providerLabel: 'Cerebras',
-    desc: 'Quick mid-size model for routine aims', meta: '128K context',
-  },
-];
-
-const DEFAULT_MODEL_ID = 'openai/gpt-oss-120b';
-
 const sampleAims = `Write a C program to implement FCFS CPU scheduling algorithm
 ---
 Write a C program to implement SJF (Non-preemptive) CPU scheduling algorithm
@@ -412,10 +373,11 @@ function renderRecentSessions() {
 }
 
 function startNewProject() {
+  cancelProjectGeneration();
   projectValidationSequence++;
   projectGenerationSequence++;
   projectImageSequence++;
-  state.config = { mode: null, projectSubmode: null, provider: null, apiKey: '', termUser: 'student', termHost: 'ubuntu', codeLang: 'c', jevQualityGate: false };
+  state.config = { mode: null, mainMode: null, projectSubmode: null, baseUrl: '', model: '', apiKey: '', termUser: 'student', termHost: 'ubuntu', codeLang: 'c', jevQualityGate: false };
   state.aimsText = '';
   state.experiments = [];
   state.logs = [];
@@ -429,7 +391,6 @@ function startNewProject() {
   updateEditorDisplay();
 
   document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
-  document.querySelectorAll('.provider-card').forEach(c => c.classList.remove('selected'));
   document.getElementById('mode-options').style.display = 'none';
   selectMode(null);
   
@@ -440,45 +401,24 @@ function startNewProject() {
 /* ============================
    SETUP
    ============================ */
-function initProviders() {
-  const grid = document.getElementById('provider-grid');
-  const tagClass = { Recommended: 'tag-rec', Fastest: 'tag-fast', Preview: 'tag-preview' };
-
-  grid.innerHTML = models.map(m => `
-    <div class="provider-card" data-model="${m.id}" data-provider="${m.provider}"
-         role="radio" tabindex="0" aria-checked="false"
-         onclick="selectModelConfig('${m.id}')"
-         onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();selectModelConfig('${m.id}')}">
-      <div class="pcard-top">
-        <span class="pname">${m.name}</span>
-        ${m.tag ? `<span class="ptag ${tagClass[m.tag] || ''}">${m.tag}</span>` : ''}
-      </div>
-      <p class="pdesc">${m.desc}</p>
-      <div class="pcard-foot">
-        <span class="pprovider" data-provider="${m.provider}">${m.providerLabel}</span>
-        <span class="pmeta">${m.meta || ''}</span>
-      </div>
-    </div>
-  `).join('');
-
-  // A custom model ID overrides the card selection but keeps the chosen provider.
-  document.getElementById('customModel').addEventListener('input', (e) => {
-    const val = e.target.value.trim();
-    if (val) {
-      document.querySelectorAll('.provider-card').forEach(c => {
-        c.classList.remove('selected');
-        c.setAttribute('aria-checked', 'false');
-      });
-      state.config.model = val;
-    } else {
-      selectModelConfig(state.config.modelCardId || DEFAULT_MODEL_ID);
-    }
-  });
+function selectMainMode(mainMode) {
+  if (mainMode === 'project') selectMode('project');
+  else if (mainMode === 'lab') selectMode('coding');
+  else if (mainMode === 'custom') selectMode(state.config.customStyle || 'os');
 }
 
 function selectMode(mode) {
+  if (state.config.mode === 'project' && mode !== 'project') cancelProjectGeneration();
   state.config.mode = mode;
-  document.querySelectorAll('.mode-card').forEach(c => c.classList.toggle('selected', c.dataset.mode === mode));
+  state.config.mainMode = mode === 'project' ? 'project' : mode === 'coding' ? 'lab' : mode ? 'custom' : null;
+  if (['os', 'cn', 'auto'].includes(mode)) state.config.customStyle = mode;
+  document.querySelectorAll('.mode-card').forEach(card => {
+    const selected = card.dataset.mode === state.config.mainMode;
+    card.classList.toggle('selected', selected);
+    card.setAttribute('aria-pressed', String(selected));
+  });
+  document.getElementById('custom-file-options').style.display = state.config.mainMode === 'custom' ? 'block' : 'none';
+  document.getElementById('fileStyle').value = state.config.customStyle || 'os';
   const opts = document.getElementById('mode-options');
   // Auto mode classifies each aim at generation time; OS + coding options both apply.
   opts.style.display = mode === 'auto' ? 'none' : 'block';
@@ -487,7 +427,7 @@ function selectMode(mode) {
   if (mode === 'auto') {
     opts.style.display = 'block';
   }
-  document.getElementById('cn-options').style.display = mode === 'cn' ? 'block' : 'none';
+  document.getElementById('cn-options').style.display = (mode === 'cn' || mode === 'auto') ? 'block' : 'none';
   document.getElementById('project-options').style.display = mode === 'project' ? 'block' : 'none';
   for (const id of ['model-options', 'key-options']) document.getElementById(id).style.display = mode === 'cn' ? 'none' : 'block';
   document.getElementById('quality-options').style.display = (mode === 'cn' || mode === 'project') ? 'none' : 'flex';
@@ -509,6 +449,7 @@ function selectProjectSubmode(submode, preserveContext = false) {
   if (!['frontend', 'dbms'].includes(submode)) return;
   const changed = state.config.projectSubmode && state.config.projectSubmode !== submode;
   if (changed) {
+    cancelProjectGeneration();
     projectValidationSequence++;
     projectGenerationSequence++;
     projectImageSequence++;
@@ -527,21 +468,6 @@ function selectProjectSubmode(submode, preserveContext = false) {
   renderProjectValidation();
   renderProjectImages();
   loadProjectPrompt();
-}
-
-function selectModelConfig(id) {
-  const m = models.find(x => x.id === id);
-  if (!m) return;
-  state.config.provider = m.provider;
-  state.config.model = m.id;
-  state.config.modelCardId = m.id;
-
-  document.querySelectorAll('.provider-card').forEach(c => {
-    const on = c.dataset.model === id;
-    c.classList.toggle('selected', on);
-    c.setAttribute('aria-checked', String(on));
-  });
-  document.getElementById('customModel').value = '';
 }
 
 function toggleApiKey() {
@@ -576,11 +502,6 @@ function proceedToAims() {
     showToast('warn', 'Choose Frontend or DBMS project report type.');
     return;
   }
-  if (state.config.mode !== 'cn' && !state.config.model && !document.getElementById('customModel').value.trim()) {
-    showToast('warn', 'Please select an LLM provider or enter a custom model ID.'); 
-    return; 
-  }
-  
   saveToLocalStorage();
   navigate('aims');
 }
@@ -594,6 +515,18 @@ const PROJECT_MAX_TOTAL_IMAGE_BYTES = 2_500_000;
 let projectValidationSequence = 0;
 let projectGenerationSequence = 0;
 let projectImageSequence = 0;
+let projectAbortController = null;
+
+function cancelProjectGeneration() {
+  projectGenerationSequence++;
+  projectAbortController?.abort();
+  projectAbortController = null;
+  if (state.projectFile.generationStatus === 'generating') {
+    state.projectFile.generationStatus = 'idle';
+    state.isGenerating = false;
+    document.getElementById('genSpinner').style.display = 'none';
+  }
+}
 
 function renderProjectWorkspace() {
   const projectMode = state.config.mode === 'project';
@@ -627,6 +560,7 @@ async function loadProjectPrompt() {
     state.projectFile.prompt = data.prompt || '';
     promptNode.textContent = state.projectFile.prompt;
   } catch (err) {
+    if (state.config.projectSubmode !== requestedSubmode) return;
     promptNode.textContent = `Collector prompt unavailable: ${err.message}`;
     showToast('error', 'Could not load the collector prompt.');
   }
@@ -659,12 +593,14 @@ async function copyProjectPrompt() {
 }
 
 function markProjectContextStale(rawValue) {
+  cancelProjectGeneration();
   projectValidationSequence++;
   projectGenerationSequence++;
   projectImageSequence++;
   state.projectFile.rawContext = String(rawValue ?? document.getElementById('projectContextInput').value);
   state.projectFile.normalized = null;
   state.projectFile.report = null;
+  state.projectFile.completedSections = {};
   state.projectFile.images = [];
   state.projectFile.generationStatus = 'idle';
   state.projectFile.validation = {
@@ -673,12 +609,17 @@ function markProjectContextStale(rawValue) {
   state.generationComplete = false;
   renderProjectValidation();
   renderProjectImages();
+  persistSession();
 }
 
 function handleProjectContextFile(event) {
   const file = event.target.files?.[0];
   event.target.value = '';
   if (!file) return;
+  if (file.size > 1_200_000) {
+    showToast('error', 'Context file is too large. Request compact facts only (maximum 300,000 characters).');
+    return;
+  }
   if (!file.name.toLowerCase().endsWith('.json')) {
     showToast('error', 'Choose a .json context file.');
     return;
@@ -695,6 +636,8 @@ function handleProjectContextFile(event) {
 }
 
 function renderProjectValidation() {
+  const size = (state.projectFile.rawContext || '').length;
+  document.getElementById('projectContextSize').textContent = `${size.toLocaleString()} characters · limit 300,000`;
   const panel = document.getElementById('projectValidationPanel');
   const summary = document.getElementById('projectValidationSummary');
   const details = document.getElementById('projectValidationDetails');
@@ -750,6 +693,11 @@ async function validateProjectContext() {
     showToast('warn', 'Paste the JSON returned by your existing AI session.');
     return;
   }
+  if (rawContext.length > 300_000) {
+    showToast('error', 'Context exceeds 300,000 characters. Request compact facts without report prose.');
+    return;
+  }
+  if (rawContext !== state.projectFile.rawContext.trim()) markProjectContextStale(rawContext);
 
   state.projectFile.rawContext = rawContext;
   const requestSequence = ++projectValidationSequence;
@@ -1130,15 +1078,7 @@ async function startGeneration() {
   state.config.codeLang = document.getElementById('codeLang')?.value || 'c';
   state.config.jevQualityGate = Boolean(document.getElementById('jevQualityGate')?.checked);
 
-  let provider = state.config.provider;
-  let model = state.config.model;
-  const customModel = document.getElementById('customModel').value.trim();
-  if (customModel) {
-    model = customModel;
-    if (!provider) provider = 'groq';
-  }
-
-  const apiKey = document.getElementById('apiKey').value.trim();
+  const { provider, model, apiKey, baseUrl } = genContext();
 
   state.experiments = aims.map((aim, i) => ({
     id: i, aim, status: 'queued', number: String(i + 1).padStart(3, '0'),
@@ -1152,13 +1092,13 @@ async function startGeneration() {
   document.getElementById('genTerminal').innerHTML = '';
   document.getElementById('reviewBtn').style.display = 'none';
   document.getElementById('genSpinner').style.display = 'block';
-  document.getElementById('genSubtitle').textContent = state.config.mode === 'cn' ? 'Preparing personalised CN experiments...' : `Processing your experiments with ${model}...`;
+  document.getElementById('genSubtitle').textContent = state.config.mode === 'cn' ? 'Preparing personalised CN experiments...' : `Processing your experiments with ${model || "the configured model"}...`;
 
   navigate('generation');
   renderExpGrid();
 
   addGenLog(`Starting generation for ${aims.length} experiment(s)`, 'info');
-  addGenLog(state.config.mode === 'cn' ? 'CN templates: addressing, configurations and figures' : `Target: ${provider ? provider.toUpperCase() : 'CUSTOM'} / ${(model || '').toUpperCase()}`, 'info');
+  addGenLog(state.config.mode === 'cn' ? 'CN templates: addressing, configurations and figures' : `Model: ${model || 'server default'}`, 'info');
   addGenLog('Concurrency: 3 experiments in parallel', 'info');
   addGenLog('---', 'info');
 
@@ -1187,12 +1127,15 @@ function renderProjectGenerationCard(status, message) {
 }
 
 async function startProjectGeneration() {
+  if (state.isGenerating) return;
   if (state.projectFile.validation.status !== 'valid' || !state.projectFile.normalized) {
     showToast('warn', 'Validate the project context before building the report.');
     return;
   }
-  const { provider, model, apiKey } = genContext();
+  const { provider, model, apiKey, baseUrl } = genContext();
   const requestSequence = ++projectGenerationSequence;
+  projectAbortController = typeof AbortController === 'undefined' ? null : new AbortController();
+  const signal = projectAbortController?.signal;
   const generatedFields = state.projectFile.validation.generationNeeded || [];
   state.isGenerating = true;
   state.generationComplete = false;
@@ -1216,20 +1159,47 @@ async function startProjectGeneration() {
   addGenLog('Verified context accepted', 'success');
   if (generatedFields.length) {
     addGenLog(`Hybrid completion: ${generatedFields.join(', ')}`, 'info');
-    addGenLog(`Target: ${(provider || 'GROQ').toUpperCase()} / ${(model || DEFAULT_MODEL_ID).toUpperCase()}`, 'info');
+    addGenLog(`Model: ${model || 'server default'}`, 'info');
   } else {
     addGenLog('No fallback LLM call required', 'success');
   }
 
   try {
+    for (let index = 0; index < generatedFields.length; index++) {
+      const section = generatedFields[index];
+      if (state.projectFile.completedSections[section]) continue;
+      const label = section.replaceAll('_', ' ');
+      renderProjectGenerationCard('generating', `Writing ${label} (${index + 1}/${generatedFields.length})...`);
+      const sectionResponse = await fetch('/api/project/section', {
+        method: 'POST', signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          submode: state.config.projectSubmode, context: state.projectFile.normalized,
+          section, provider, model, base_url: baseUrl, api_key: apiKey
+        })
+      });
+      const sectionData = await sectionResponse.json().catch(() => ({}));
+      if (requestSequence !== projectGenerationSequence || !state.isGenerating) return;
+      if (!sectionResponse.ok || sectionData.error || !sectionData.text) {
+        throw new Error(`${label}: ${sectionData.error || 'No section returned. The server may have timed out.'} Completed sections are saved; retry to continue.`);
+      }
+      state.projectFile.completedSections[section] = sectionData.text;
+      persistSession();
+      const progress = Math.round(10 + 80 * (index + 1) / generatedFields.length);
+      document.getElementById('genProgress').style.width = `${progress}%`;
+      document.getElementById('genPercent').textContent = `${progress}%`;
+      addGenLog(`Saved ${label}`, 'success');
+    }
     const response = await fetch('/api/project/generate', {
-      method: 'POST',
+      method: 'POST', signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         submode: state.config.projectSubmode,
         context: state.projectFile.normalized,
+        completed_sections: state.projectFile.completedSections,
         provider: provider || 'groq',
-        model: model || DEFAULT_MODEL_ID,
+        model,
+        base_url: baseUrl,
         api_key: apiKey
       })
     });
@@ -1257,12 +1227,14 @@ async function startProjectGeneration() {
     if (requestSequence !== projectGenerationSequence || !state.isGenerating) return;
     state.projectFile.generationStatus = 'failed';
     renderProjectGenerationCard('failed', err.message);
+    document.getElementById('expGrid').insertAdjacentHTML('beforeend', '<button class="btn btn-primary" onclick="startProjectGeneration()">Retry remaining sections</button>');
     document.getElementById('genSubtitle').textContent = 'The report could not be assembled.';
     addGenLog(`Project report failed: ${err.message}`, 'error');
     showToast('error', 'Project report generation failed.');
   } finally {
     if (requestSequence === projectGenerationSequence) {
       state.isGenerating = false;
+      projectAbortController = null;
       document.getElementById('genSpinner').style.display = 'none';
     }
   }
@@ -1273,15 +1245,11 @@ async function startProjectGeneration() {
  * Shared by generation, retry, refine and classroom flows.
  */
 function genContext() {
-  let provider = state.config.provider;
-  let model = state.config.model;
-  const customModel = document.getElementById('customModel').value.trim();
-  if (customModel) {
-    model = customModel;
-    if (!provider) provider = 'groq';
-  }
+  const baseUrl = document.getElementById('apiEndpoint').value.trim();
+  const model = document.getElementById('customModel').value.trim();
   const apiKey = document.getElementById('apiKey').value.trim();
-  return { provider, model, apiKey };
+  Object.assign(state.config, { baseUrl, model, apiKey });
+  return { provider: baseUrl ? 'custom' : 'groq', model, apiKey, baseUrl };
 }
 
 /**
@@ -1292,7 +1260,7 @@ async function generateOne(idx) {
   const exp = state.experiments[idx];
   if (!exp || !state.isGenerating) return;
 
-  const { provider, model, apiKey } = genContext();
+  const { provider, model, apiKey, baseUrl } = genContext();
   const autoDetect = state.config.mode === 'auto';
 
   exp.status = 'synthesizing';
@@ -1316,7 +1284,8 @@ async function generateOne(idx) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           aim: exp.aim,
-          api_key: apiKey,
+          base_url: baseUrl,
+        api_key: apiKey,
           provider,
           model,
           mode: autoDetect ? 'auto' : state.config.mode,
@@ -1386,6 +1355,7 @@ function finishGeneration() {
 }
 
 function stopGeneration() {
+  cancelProjectGeneration();
   if (state.config.mode === 'project') projectGenerationSequence++;
   state.isGenerating = false;
   state.genTimeouts.forEach(t => clearTimeout(t));
@@ -1398,7 +1368,7 @@ async function retryExperiment(idx) {
   if (idx < 0 || idx >= state.experiments.length) return;
   const exp = state.experiments[idx];
 
-  const { provider, model, apiKey } = genContext();
+  const { provider, model, apiKey, baseUrl } = genContext();
   const autoDetect = state.config.mode === 'auto';
 
   exp.status = 'synthesizing';
@@ -1412,6 +1382,7 @@ async function retryExperiment(idx) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         aim: exp.aim,
+        base_url: baseUrl,
         api_key: apiKey,
         provider,
         model,
@@ -1708,14 +1679,7 @@ async function applyRefine() {
 
   const exp = state.experiments[idx];
   
-  let provider = state.config.provider;
-  let model = state.config.model;
-  const customModel = document.getElementById('customModel').value.trim();
-  if (customModel) {
-    model = customModel;
-    if (!provider) provider = 'groq';
-  }
-  const apiKey = document.getElementById('apiKey').value.trim();
+  const { provider, model, apiKey, baseUrl } = genContext();
 
   try {
     // Bug 3 — call the dedicated /api/refine endpoint with the FULL existing
@@ -1730,10 +1694,11 @@ async function applyRefine() {
         existing_code: exp.code,
         existing_output: exp.output,
         existing_steps: exp.steps || [],
+        base_url: baseUrl,
         api_key: apiKey,
         provider,
         model,
-        mode: state.config.mode,
+        mode: exp.detectedMode || (expIsOs(exp) ? 'os' : 'coding'),
         code_language: state.config.codeLang,
         student: state.config.student || {},
         terminal_user: state.config.termUser,
@@ -2048,13 +2013,13 @@ async function autoDetectAims() {
 
     // If the batch is mixed, recommend Auto mode (per-experiment detection at generate time).
     if (osCount > 0 && genCount > 0) {
-      state.config.mode = 'auto';
+      selectMode('auto');
       showToast('success', `Mixed batch detected (${osCount} OS, ${genCount} coding). Using Auto mode — each experiment is classified at generation.`);
     } else if (osCount > 0) {
-      state.config.mode = 'os';
+      selectMode('os');
       showToast('success', `Detected: OS practical mode for all ${osCount} aims.`);
     } else {
-      state.config.mode = 'coding';
+      selectMode('coding');
       if (langs.length === 1) {
         state.config.codeLang = langs[0];
         const sel = document.getElementById('codeLang');
@@ -2084,13 +2049,14 @@ async function handlePdfImport(e) {
   }
 
   showToast('info', `Extracting aims from ${file.name}...`);
-  const { provider, model, apiKey } = genContext();
+  const { provider, model, apiKey, baseUrl } = genContext();
 
   const form = new FormData();
   form.append('file', file);
   form.append('api_key', apiKey);
   form.append('provider', provider || 'groq');
-  form.append('model', model || DEFAULT_MODEL_ID);
+  form.append('model', model);
+  form.append('base_url', baseUrl);
 
   try {
     const res = await fetch('/api/extract-aims', { method: 'POST', body: form });
@@ -2129,7 +2095,7 @@ async function downloadClassroomZip() {
   const original = btn.innerHTML;
   btn.disabled = true;
 
-  const { provider, model, apiKey } = genContext();
+  const { provider, model, apiKey, baseUrl } = genContext();
   const profile = EXPORT_PROFILES[0];
   const students = [];
 
@@ -2146,7 +2112,8 @@ async function downloadClassroomZip() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               aim: exp.aim,
-              api_key: apiKey,
+              base_url: baseUrl,
+        api_key: apiKey,
               provider,
               model,
               mode: state.config.mode === 'auto' ? 'auto' : state.config.mode,
@@ -2304,20 +2271,23 @@ document.addEventListener('keydown', (e) => {
    LOCAL STORAGE STORAGE HELPERS
    ============================ */
 function saveToLocalStorage() {
-  localStorage.setItem('practigen_api_key_v5', $('#apiKey').value);
+  localStorage.setItem('practigen_api_key_v6', $('#apiKey').value);
   localStorage.setItem('practigen_code_language_v5', $('#codeLang').value);
   localStorage.setItem('practigen_term_user_v5', $('#termUser').value);
   localStorage.setItem('practigen_term_host_v5', $('#termHost').value);
-  localStorage.setItem('practigen_custom_model_v5', $('#customModel').value.trim());
+  genContext();
+  localStorage.setItem('practigen_endpoint_v1', $('#apiEndpoint').value.trim());
+  localStorage.setItem('practigen_model_v6', $('#customModel').value.trim());
   localStorage.setItem('practigen_jev_quality_gate_v1', String($('#jevQualityGate').checked));
 }
 
 function loadFromLocalStorage() {
-  $('#apiKey').value = localStorage.getItem('practigen_api_key_v5') || '';
+  $('#apiKey').value = localStorage.getItem('practigen_api_key_v6') || '';
   $('#codeLang').value = localStorage.getItem('practigen_code_language_v5') || 'c';
   $('#termUser').value = localStorage.getItem('practigen_term_user_v5') || 'student';
   $('#termHost').value = localStorage.getItem('practigen_term_host_v5') || 'ubuntu';
-  $('#customModel').value = localStorage.getItem('practigen_custom_model_v5') || '';
+  $('#apiEndpoint').value = localStorage.getItem('practigen_endpoint_v1') || '';
+  $('#customModel').value = localStorage.getItem('practigen_model_v6') || '';
   $('#jevQualityGate').checked = localStorage.getItem('practigen_jev_quality_gate_v1') === 'true';
 }
 
@@ -2331,6 +2301,7 @@ function persistSession() {
   try {
     const projectFile = {
       ...state.projectFile,
+      generationStatus: state.projectFile.report ? 'complete' : 'idle',
       prompt: '',
       images: []
     };
@@ -2390,8 +2361,21 @@ function restoreSession() {
   };
   state.generationComplete = state.config.mode === 'project'
     ? Boolean(state.projectFile.report)
-    : true;
+    : state.experiments.some(exp => exp.status === 'complete');
   selectMode(state.config.mode);
+  if (state.config.provider && !['groq', 'custom'].includes(state.config.provider) && !state.config.baseUrl) {
+    state.config.apiKey = '';
+    state.config.model = '';
+    showToast('warn', 'This session used a removed provider preset. Set its endpoint, model and key in Setup before generating again.');
+  }
+  delete state.config.provider;
+  delete state.config.modelCardId;
+  $('#apiEndpoint').value = state.config.baseUrl || '';
+  $('#customModel').value = state.config.model || '';
+  $('#apiKey').value = state.config.apiKey || '';
+  $('#codeLang').value = state.config.codeLang || 'c';
+  $('#termUser').value = state.config.termUser || 'student';
+  $('#termHost').value = state.config.termHost || 'ubuntu';
 
   if (state.config.mode === 'project') {
     if (state.config.projectSubmode) selectProjectSubmode(state.config.projectSubmode, true);
@@ -2425,15 +2409,12 @@ function clearSession() {
    ============================ */
 function init() {
   initDashboard();
-  initProviders();
   loadFromLocalStorage();
   updateEditorDisplay();
   document.getElementById('projectContextInput').addEventListener('input', (event) => {
     markProjectContextStale(event.target.value);
   });
 
-  // Select the recommended model by default
-  selectModelConfig(DEFAULT_MODEL_ID);
 
   // Enhancement 3 — offer to restore a previous session if one exists.
   maybeOfferRestore();

@@ -93,18 +93,18 @@
         <div style="max-width:780px;margin:0 auto;text-align:center">
           <p style="color:var(--muted);font-size:.88rem;margin-bottom:.4rem" id="greeting">Good evening.</p>
           <h1 style="font-size:2.4rem;font-weight:700;letter-spacing:-.03em;line-height:1.12;margin-bottom:.85rem">
-            From aims to <span style="color:var(--accent)">ready-to-submit</span><br>practical file.
+            Your work, in a <span style="color:var(--accent)">formatted</span><br>Word file.
           </h1>
           <p style="color:var(--text-sec);font-size:.95rem;max-width:480px;margin:0 auto 1.75rem;line-height:1.55">
-            Paste your experiment list. AI writes the theory, code, and output. Download as a formatted .docx.
+            Create a project report, programming lab file, or OS/CN/custom practical. Add your project facts or experiment aims, review, and download.
           </p>
           <button class="btn btn-primary btn-lg" onclick="startNewProject()" style="font-size:1.05rem;padding:.85rem 2.2rem">
-            <i class="fas fa-plus"></i> Start New Project
+            <i class="fas fa-plus"></i> Start New File
           </button>
 
           
           <div class="pipeline-flow" style="margin:3rem 0 1rem">
-            <div class="flow-step"><div class="flow-icon"><i class="fas fa-paste"></i></div><span class="flow-label">Paste Aims</span></div>
+            <div class="flow-step"><div class="flow-icon"><i class="fas fa-paste"></i></div><span class="flow-label">Add Inputs</span></div>
             <div class="flow-arrow"><i class="fas fa-arrow-right"></i></div>
             <div class="flow-step"><div class="flow-icon"><i class="fas fa-microchip"></i></div><span class="flow-label">AI Generates</span></div>
             <div class="flow-arrow"><i class="fas fa-arrow-right"></i></div>
@@ -113,9 +113,9 @@
             <div class="flow-step"><div class="flow-icon"><i class="fas fa-file-arrow-down"></i></div><span class="flow-label">Download</span></div>
           </div>
           <div style="display:flex;justify-content:center;gap:.5rem;margin-bottom:3rem;flex-wrap:wrap">
-            <span class="badge badge-amber" style="font-size:.65rem;padding:.15rem .5rem">Groq</span>
-            <span class="badge badge-teal" style="font-size:.65rem;padding:.15rem .5rem">Cerebras</span>
-            <span style="color:var(--muted);font-size:.72rem;line-height:1.8"> — switch models anytime</span>
+            <span class="badge badge-amber" style="font-size:.65rem;padding:.15rem .5rem">Word export</span>
+            <span class="badge badge-teal" style="font-size:.65rem;padding:.15rem .5rem">Custom AI endpoint</span>
+            <span style="color:var(--muted);font-size:.72rem;line-height:1.8">Keep your progress with session restore</span>
           </div>
 
           <div style="text-align:left">
@@ -133,31 +133,26 @@
             <div style="margin-bottom:2rem;">
               <label class="label">Generation Mode</label>
               <div style="display:flex;flex-wrap:wrap;gap:1rem;margin-top:0.5rem;">
-                <div class="mode-card" data-mode="os" onclick="selectMode('os')">
-                  <i class="fas fa-terminal"></i>
-                  <h4>OS Practical</h4>
-                  <p>Step-by-step Linux commands with terminal output</p>
-                </div>
-                <div class="mode-card" data-mode="coding" onclick="selectMode('coding')">
-                  <i class="fas fa-code"></i>
-                  <h4>General Coding</h4>
-                  <p>Standard programming with code + output</p>
-                </div>
-                <div class="mode-card" data-mode="cn" onclick="selectMode('cn')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectMode('cn')}">
-                  <i class="fas fa-network-wired"></i>
-                  <h4>Computer Networks</h4>
-                  <p>Aims + student details → diagrams, configurations and Word report</p>
-                </div>
-                <div class="mode-card" data-mode="project" onclick="selectMode('project')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectMode('project')}">
-                  <i class="fas fa-folder-open"></i>
-                  <h4>Project File</h4>
-                  <p>Bridge an existing AI build session into a formatted project report</p>
-                </div>
-                <div class="mode-card" data-mode="auto" onclick="selectMode('auto')">
-                  <i class="fas fa-wand-magic-sparkles"></i>
-                  <h4>Auto-Detect</h4>
-                  <p>Classify each aim's mode &amp; language automatically</p>
-                </div>
+                <button type="button" class="mode-card" data-mode="project" onclick="selectMainMode('project')" aria-pressed="false">
+                  <i class="fas fa-folder-open"></i><h4>Project files</h4>
+                  <p>Frontend and DBMS reports from your existing project's facts and screenshots.</p>
+                </button>
+                <button type="button" class="mode-card" data-mode="lab" onclick="selectMainMode('lab')" aria-pressed="false">
+                  <i class="fas fa-code"></i><h4>Lab files</h4>
+                  <p>Programming practicals with explanations, source code and sample output.</p>
+                </button>
+                <button type="button" class="mode-card" data-mode="custom" onclick="selectMainMode('custom')" aria-pressed="false">
+                  <i class="fas fa-terminal"></i><h4>OS/CN/Custom files</h4>
+                  <p>Linux commands, networking experiments, or mixed aims detected individually.</p>
+                </button>
+              </div>
+              <div id="custom-file-options" style="display:none;margin-top:1rem;">
+                <label class="label" for="fileStyle">File type</label>
+                <select class="select" id="fileStyle" onchange="selectMode(this.value)">
+                  <option value="os">OS - Linux commands and terminal steps</option>
+                  <option value="cn">CN - networking plans and diagrams (no API key)</option>
+                  <option value="auto">Custom - auto-detect each aim and language</option>
+                </select>
               </div>
               <div id="mode-options" style="margin-top:1rem;display:none;">
                 <div id="os-options" style="display:none;">
@@ -187,7 +182,7 @@
                       <i class="fab fa-java"></i><span>Java</span><small>Awaiting report conventions</small>
                     </button>
                   </div>
-                  <p class="helper">The selected model is used only when your existing AI session leaves report prose blank. Verified project facts are always required from the context pack.</p>
+                  <p class="helper">Compact collection leaves prose blank for drafting here. Existing complete reports can also be imported without an API key. Verified project facts are always required from the context pack.</p>
                 </div>
                 <div id="coding-options" style="display:none;">
                   <label class="label">Code Language</label>
@@ -202,16 +197,15 @@
 
             
             <div id="model-options" style="margin-bottom:2rem;">
-              <label class="label">Model</label>
-              <div class="grid-5" id="provider-grid" role="radiogroup" aria-label="Model"
-                   style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:0.65rem;margin-top:0.5rem;"></div>
-              <div style="margin-top:0.75rem;">
-                <input class="input" id="customModel" placeholder="Custom Model ID (optional — overrides selection)">
-                <p class="helper">Runs on the provider of the card you last picked. Leave empty to use the card itself.</p>
-              </div>
+              <label class="label" for="apiEndpoint">AI endpoint</label>
+              <input class="input" id="apiEndpoint" type="url" placeholder="Default / server endpoint (Groq unless configured)">
+              <p class="helper">Optional OpenAI-compatible API base URL, such as https://your-host/v1. Leave blank to use the server default.</p>
+              <label class="label" for="customModel" style="margin-top:.8rem;">Model ID</label>
+              <input class="input" id="customModel" placeholder="Default / server model (openai/gpt-oss-120b)">
+              <p class="helper">One default model. For a custom endpoint, enter the model ID that endpoint supports.</p>
             </div>
 
-            
+
             <div id="key-options" style="margin-bottom:2rem;">
               <label class="label">API Key</label>
               <div style="position:relative;">
@@ -221,7 +215,7 @@
                   <i class="fas fa-eye" id="apiKeyEye"></i>
                 </button>
               </div>
-              <p class="helper">Leave empty to use system defaults.</p>
+              <p class="helper">Leave empty to use the server key for its configured endpoint. Keys are never reused for a different endpoint.</p>
             </div>
 
             <label id="quality-options" style="display:flex;align-items:flex-start;gap:.65rem;margin:-.75rem 0 2rem;cursor:pointer;">
@@ -266,7 +260,7 @@
             <div class="card" style="margin-top:1rem;background:var(--amber-dim);border-color:rgba(240,160,48,0.15);">
               <p style="font-size:0.78rem;color:var(--amber);line-height:1.5;">
                 <i class="fas fa-lightbulb" style="margin-right:0.35rem;"></i>
-                <strong>Pro tip:</strong> Use the Cerebras Qwen 2.5 32B model for best results on OS practicals.
+                <strong>Pro tip:</strong> A complete Project context needs no AI call. Compact facts need an API key for drafting; CN experiments need no key.
               </p>
             </div>
           </div>
@@ -351,10 +345,11 @@ Write a C program to simulate Banker's Algorithm for deadlock avoidance"></texta
             <section class="card project-stage-card">
               <div class="project-stage-number">2</div>
               <div class="project-stage-heading">
-                <h3>Return the JSON context</h3>
-                <p>Paste the agent's complete JSON response or import a <code>.json</code> file.</p>
+                <h3>Import compact project facts</h3>
+                <p>Paste the complete facts-only response or import its <code>.json</code> file. Long report prose is drafted here, one section at a time.</p>
               </div>
               <textarea class="textarea project-context-input" id="projectContextInput" spellcheck="false" placeholder='{"schema_version":1,"submode":"frontend",...}'></textarea>
+              <p class="helper" id="projectContextSize">0 characters · limit 300,000</p>
               <input type="file" id="projectContextFile" accept=".json,application/json" style="display:none;" onchange="handleProjectContextFile(event)">
               <div class="project-action-row">
                 <button class="btn btn-secondary" onclick="document.getElementById('projectContextFile').click()"><i class="fas fa-file-import"></i> Import JSON</button>

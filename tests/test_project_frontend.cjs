@@ -22,6 +22,7 @@ function node(id) {
         },
         contains(name) { return classes.has(name); },
       },
+      insertAdjacentHTML(where, html) { this.innerHTML += html; },
       addEventListener() {}, appendChild() {}, remove() {}, setAttribute() {}, select() {}, click() {},
       querySelector() { return node('child'); },
     });
@@ -49,7 +50,7 @@ const validation = {
 
 const stored = new Map();
 const context = vm.createContext({
-  console, Blob, URL, TextEncoder, Response,
+  console, Blob, URL, TextEncoder, Response, AbortController,
   setTimeout: (fn) => { fn(); return 1; }, clearTimeout() {},
   requestAnimationFrame: fn => fn(),
   fetch: async (url) => {
@@ -75,7 +76,7 @@ const context = vm.createContext({
     execCommand: () => true,
     body: { style: { setProperty() {} }, appendChild() {} },
   },
-  window: { innerWidth: 1200, innerHeight: 800 },
+  window: { innerWidth: 1200, innerHeight: 800, URL },
   localStorage: { getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value) },
   sessionStorage: {
     getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value),
@@ -90,7 +91,16 @@ const run = code => vm.runInContext(code, context);
 context.normalized = normalized;
 
 (async () => {
-  run("selectMode('project')");
+  run('init()');
+  const html = fs.readFileSync('public/index.html', 'utf8');
+  assert.equal((html.match(/class="mode-card"/g) || []).length, 3);
+  assert.ok(!html.includes('provider-grid'));
+  run("selectMainMode('lab')");
+  assert.equal(run('state.config.mode'), 'coding');
+  run("selectMainMode('custom'); selectMode('cn')");
+  assert.equal(run('state.config.mainMode'), 'custom');
+  assert.equal(node('model-options').style.display, 'none');
+  run("selectMainMode('project')");
   assert.equal(node('project-options').style.display, 'block');
   assert.equal(node('quality-options').style.display, 'none');
   assert.equal(node('formatting-shell').style.display, 'none');
@@ -181,6 +191,47 @@ context.normalized = normalized;
   assert.ok(node('reviewAccordion').innerHTML.includes('&lt;img'));
   assert.ok(!node('reviewAccordion').innerHTML.includes('<script>'));
   assert.equal(run('projectOutputFilename()'), 'Portal_scriptalert1script.docx');
+
+  // Fail the second section, restore the session, and resume without repeating the first.
+  node('apiEndpoint').value = 'https://custom.example/v1';
+  node('customModel').value = 'custom-model';
+  node('apiKey').value = 'user-key';
+  run('state.projectFile.report=null; state.projectFile.validation.generationNeeded=["abstract", "design_methodology"]; state.projectFile.completedSections={};');
+  const sectionCalls = [];
+  let failDesign = true;
+  context.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (url === '/api/project/section') {
+      sectionCalls.push(body.section);
+      assert.equal(body.base_url, 'https://custom.example/v1');
+      assert.equal(body.model, 'custom-model');
+      assert.equal(body.api_key, 'user-key');
+      if (body.section === 'design_methodology' && failDesign) {
+        return new Response(JSON.stringify({ error: 'Try again' }), { status: 502 });
+      }
+      return new Response(JSON.stringify({ section: body.section, text: 'Verified section prose describing the supplied implementation.' }));
+    }
+    if (url === '/api/project/generate') {
+      assert.equal(Object.keys(body.completed_sections).length, 2);
+      return new Response(JSON.stringify({ report: context.report, warnings: [] }));
+    }
+    if (url === '/api/project/download') return new Response(new Blob(['mock-docx']));
+    return normalFetch(url);
+  };
+  await run('startProjectGeneration()');
+  assert.equal(run('state.projectFile.generationStatus'), 'failed');
+  assert.ok(run('state.projectFile.completedSections.abstract'));
+  run('state.projectFile=createEmptyProjectFileState(); restoreSession()');
+  assert.equal(node('apiEndpoint').value, 'https://custom.example/v1');
+  failDesign = false;
+  await run('startProjectGeneration()');
+  assert.deepEqual(sectionCalls, ['abstract', 'design_methodology', 'design_methodology']);
+  assert.equal(run('state.projectFile.generationStatus'), 'complete');
+  run('launchConfetti = () => {};');
+  await run('downloadProjectDocument()');
+  assert.equal(node('downloadBtn').disabled, false);
+  assert.equal(node('created').download, 'Portal_scriptalert1script.docx');
+  context.fetch = normalFetch;
 
   run("markProjectContextStale('{\"changed\":true}')");
   assert.equal(run('state.projectFile.report'), null);
