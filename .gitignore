@@ -16,3 +16,4 @@ __pycache__/
 # Local test tooling
 .pytest_cache/
 .venv/
+.artifacts/
