@@ -1,170 +1,79 @@
 # PractiGen
 
-Turn experiment aims or verified project context into a formatted, submission-ready `.docx`. PractiGen builds practical files and convention-locked Frontend/DBMS project reports from one browser workflow.
+Create formatted Word files from experiment aims or verified project facts.
 
-Built for students who keep a practical lab file: OS labs, general programming labs (C, C++, Python, Java, JavaScript), and Computer Networks labs with personalised topologies, configurations and expected-output figures.
+## Three main modes
 
----
+| Mode | What it creates |
+| --- | --- |
+| **Project files** | Frontend or DBMS project reports from repository facts, supplied prose and screenshots. |
+| **Lab files** | Programming practicals with explanations, source code and sample output in C, C++, Python, Java or JavaScript. |
+| **OS/CN/Custom files** | Choose Linux command steps, deterministic networking experiments, or custom mixed aims with per-aim language/type detection. |
 
-## Features
+Within these modes, aim imports, PDF syllabus extraction, refinement, formatting, session restore and classroom ZIP exports remain available where applicable. CN uses eight deterministic recipes and needs no AI key; generated expectations are not claimed simulator observations. See [CN files](docs/computer-networks.md).
 
-- **Aim → document in one flow.** Paste aims separated by `---`, generate, review, download.
-- **Three lab styles.** OS mode produces Linux steps, coding mode produces source and console output, and CN mode generates eight supported network experiments without an API key.
-- **CN personalisation.** Enter name, roll number and optional section. Paste your index or load sample aims. Generate consistent IP plans, device configurations, diagrams, verification panels and a sample-style Word file without a cover page. See [CN mode](docs/computer-networks.md) for supported aims and execution limits.
-- **Project File context bridge.** Copy a Frontend or DBMS collector prompt into the AI session already working on the project, return its structured JSON, validate the evidence, optionally add screenshots, and export a formatted report. Supplied prose is preserved and only blank sections use an LLM. See [Project File mode](docs/project-files.md).
-- **Auto-detect.** Let PractiGen infer the right mode and language per aim — a mixed batch of "explore `grep`" and "binary search in Java" is classified per experiment.
-- **Language lock.** Choose a language and the output stays in it, even if an aim says otherwise. Generated code is heuristically validated and regenerated once if it comes back in the wrong language.
-- **Plagiarism-safe variation.** Every generation uses a random variation seed, so the same aim produces different variable names, examples, and sample data each time.
-- **Targeted refine.** Ask for a specific change ("add comments", "use different variable names") and only that changes — the rest of the experiment is preserved.
-- **Classroom mode.** Generate N unique variations of the same aims (one `.docx` per student) and download them as a single ZIP.
-- **Syllabus import.** Upload a course syllabus PDF and PractiGen extracts the experiment aims for you.
-- **Resilient generation.** Concurrent batches, per-experiment retry, multi-provider fallback, and key rotation. A failed experiment can be retried on its own without re-running the batch.
-- **Session restore.** Work survives an accidental tab refresh via `sessionStorage`.
-- **Multi-provider.** Groq, Cerebras, and FreeModel (OpenAI- and Anthropic-compatible) with automatic fallback.
+## Project workflow
 
----
+1. Choose Project files, then Frontend or DBMS.
+2. Copy the compact collector prompt into the AI session that already knows your repository.
+3. Paste its complete facts-only JSON or import a `.json` file, then validate it.
+4. Build the report. Missing prose is drafted one section per request; supplied prose is preserved even when shorter than the writing guidance.
+5. Review and upload the images named in your context. Export a `.docx`.
 
-## Architecture
+Each completed section is saved in the browser session. If a request fails, **Retry remaining sections** resumes from the last completed section, including after session restore. Images must be reattached after a refresh. Complete supplied reports need no AI call. The compact collector leaves prose blank and therefore needs a configured AI endpoint for drafting.
 
-```
-Browser (public/)                    Flask API (app.py)              LLM providers
-─────────────────                    ──────────────────              ─────────────
-index.html  — SPA markup             /api/parse        split aims    Groq        (OpenAI fmt)
-script.js   — state + API calls      /api/generate     write lab     Cerebras    (OpenAI fmt)
-style.css   — dark UI                /api/refine       targeted edit FreeModel   (OpenAI fmt)
-                                     /api/detect       auto-classify FreeModel   (Anthropic fmt)
-                                     /api/extract-aims syllabus PDF
-                                     /api/download     build .docx
-                                     /api/classroom-zip per-student ZIP
-                                     /api/project/*    project reports
-```
+The importer accepts Markdown fences, context markers, a UTF-8 BOM, trailing commas and literal newlines in strings. It does not guess missing facts or repair truncated strings: errors identify a line/column and suggest importing a complete compact response. See [Project files](docs/project-files.md) for the schema and report conventions.
 
-- **Frontend** is a dependency-free single-page app (vanilla ES6, no build step). All UI state lives in one `state` object in `script.js`.
-- **Backend** is a single Flask module. LLM requests go through one shared runner (`run_completion`) that handles retries, exponential backoff on rate limits, provider/model fallback, and API-key rotation.
-- **Documents** are assembled with `python-docx`. Terminal/console output is rendered to a PNG with Pillow and embedded as an image, mirroring how a real practical file looks.
-- **Project reports** use the separate `project_file/` domain package for collector prompts, schema validation, hybrid prose completion, verified images, and convention-locked DOCX rendering.
-- **Deployment** targets Vercel serverless (`vercel.json` routes `/api/*` → `app.py`, everything else → `public/`).
+## Run locally
 
-### Request flow
+Python 3.9+ is required.
 
-1. Configure mode, model/provider, API key, and formatting.
-2. Paste aims separated by `---`.
-3. Generate — experiments run in concurrent batches of 3, each with its own retry loop. Cards update independently as they finish.
-4. Review the theory/code/output; refine any experiment in place.
-5. Download a single `.docx`, or enable Classroom mode for a ZIP of per-student variations.
-
----
-
-## Getting started
-
-### Prerequisites
-
-- Python 3.9+
-- For OS/coding generation, an inference provider API key or a matching server environment variable. **CN mode does not require an API key.** Project File needs a key only when the returned context leaves report prose blank.
-
-### Local development
-
-```bash
-git clone https://github.com/tanish19078/generateassignment
-cd generateassignment
-
+```sh
 pip install -r requirements.txt
-python app.py            # serves on http://localhost:5000
+python app.py
 ```
 
-Or run it the way Vercel does:
+Open http://localhost:5000. The frontend is vanilla HTML/CSS/JavaScript with no build step. Vercel deployment uses `vercel.json` to serve `public/` and route `/api/*` to Flask.
 
-```bash
-vercel dev
+## AI configuration
+
+There is one default model: `openai/gpt-oss-120b` at `https://api.groq.com/openai/v1`.
+
+Use the **AI endpoint**, **Model ID**, and **API Key** fields to connect another OpenAI-compatible chat-completions endpoint. Enter its API base URL; a full `/chat/completions` URL is also accepted. HTTP localhost endpoints are supported when running locally. Deployed custom endpoints require HTTPS. Native Anthropic payloads and provider/model galleries have been removed.
+
+Leave fields blank to use the server configuration in `.env` (see [.env.example](.env.example)):
+
+| Variable | Purpose |
+| --- | --- |
+| `LLM_BASE_URL` | Server API base URL; defaults to Groq. |
+| `LLM_MODEL` | Server model ID; defaults to GPT-OSS 120B only for Groq. |
+| `LLM_API_KEY` | Server key for that endpoint. |
+| `GROQ_API_KEY` | Compatibility fallback for the default Groq endpoint. |
+| `OPENROUTER_API_KEY` | Optional existing advisory quality review for lab generation. |
+
+A submitted key overrides server credentials. Server keys are never sent to a different user-selected endpoint; redirects are rejected, and providers are not silently switched. Each AI HTTP call has a 45-second timeout; visible retries belong to the frontend. Repeated `.env` key rotation and Cerebras/FreeModel presets are no longer supported. For an old preset, enter its endpoint, model and key again. Unscoped keys from older browser preferences are not reused automatically.
+
+Endpoint settings and keys entered in the UI are stored in that browser's local storage; report progress uses session storage. Use a trusted browser profile.
+
+## Focused checks
+
+All AI and HTTP calls in the tests are mocked. No live provider key is needed.
+
+```sh
+pip install pytest
+python -m pytest -q -p no:cacheprovider tests/test_project_file.py tests/test_llm_endpoint.py tests/test_api.py tests/test_cn.py
+node tests/test_project_frontend.cjs
+node tests/test_cn_frontend.cjs
 ```
 
-### Configuration
+The Project tests cover compact import, parsing recovery, section generation, supplied-prose preservation, image validation, and Frontend/DBMS Word exports. Frontend contracts cover three-mode navigation, endpoint persistence, failed-section resume, cancellation, review, download and session restore.
 
-Enter an API key in the UI, or set provider keys in a `.env` file at the project root:
+## Structure
 
-| Variable | Provider |
-|----------|----------|
-| `GROQ_API_KEY` | Groq |
-| `CEREBRAS_API_KEY` | Cerebras |
-| `FREEMODEL_API_KEY` | FreeModel (shared fallback for both routes) |
-| `FREEMODEL_OPENAI_API_KEY` | FreeModel (OpenAI-compatible) |
-| `FREEMODEL_ANTHROPIC_API_KEY` | FreeModel (Anthropic-compatible) |
+- `app.py`: Flask API, shared endpoint configuration, OS/coding Word generation.
+- `project_file/`: collector/schema, report assembly, image validation and project Word formatting.
+- `cn/`: deterministic networking plans, figures and Word generation.
+- `public/`: browser UI and workflow controller.
+- `tests/`: offline backend and controller checks.
 
-Listing the same variable multiple times in `.env` registers backup keys that are rotated through on rate-limit or auth failures. A key entered in the UI always takes priority over environment keys.
-
-The **Custom Model ID** field overrides the selected preset — useful when your account exposes a model name that isn't in the dropdown.
-
----
-
-## Testing
-
-The suite mocks all LLM calls, so it runs offline with no API key.
-
-```bash
-pip install pytest pytest-mock
-pytest -q                       # all tests
-pytest tests/test_utils.py -v   # pure helpers (parsing, validation, detection)
-pytest tests/test_api.py -v     # endpoints via the Flask test client
-pytest tests/test_cn.py -v      # CN plans, figures and Word exports
-pytest tests/test_project_file.py -v # project prompts, validation and Word reports
-node tests/test_cn_frontend.cjs # offline frontend controller contracts
-node tests/test_project_frontend.cjs # offline Project File UI contracts
-```
-
-- `tests/test_utils.py` — section parsing, language validation, response validation, OS step parsing, caption helpers, output truncation, auto-detect, and the prompt builder.
-- `tests/test_api.py` — `/api/parse`, `/api/generate` (temperature, variation seed, system/user split, empty-response rejection, wrong-language retry, OS steps, auto-detect), `/api/refine` (existing-context, low temperature, aim preserved), `/api/detect`, `/api/download` (valid `.docx`, batch-size guard), and `/api/extract-aims`.
-
----
-
-## Project structure
-
-```
-.
-├── app.py              # Flask backend — all API routes and document generation
-├── cn/                 # CN plans, Pillow figures and sample-style Word reports
-├── project_file/       # Project context schemas, prompts and Word reports
-├── public/
-│   ├── index.html      # Single-page UI
-│   ├── script.js       # Frontend state, API calls, rendering
-│   └── style.css       # Dark theme, layout, animations
-├── tests/
-│   ├── test_utils.py   # Unit tests for backend helpers
-│   └── test_api.py     # API integration tests (mocked LLM)
-├── requirements.txt
-├── vercel.json         # Serverless routing + function limits
-└── README.md
-```
-
----
-
-## API reference
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/cn/catalog` | GET | List eight supported CN experiment aims |
-| `/api/cn/plan` | POST | Generate a network plan without preview image bytes |
-| `/api/parse` | POST | Split raw aim text into a list by separator |
-| `/api/generate` | POST | Generate one experiment (concept, code/procedure, output, caption) |
-| `/api/refine` | POST | Edit an existing experiment with a targeted change |
-| `/api/detect` | POST | Infer mode + language for each aim |
-| `/api/extract-aims` | POST | Extract aims from an uploaded syllabus PDF (multipart) |
-| `/api/download` | POST | Build and return a `.docx` from generated experiments |
-| `/api/classroom-zip` | POST | Build one `.docx` per student and return a ZIP |
-| `/api/project/prompt/<submode>` | GET | Return a Frontend/DBMS context collector prompt |
-| `/api/project/validate` | POST | Validate and normalize a returned context pack |
-| `/api/project/generate` | POST | Build a hybrid report, filling only blank prose |
-| `/api/project/download` | POST | Revalidate and export a Project File `.docx` |
-
-Generation and download accept gzip-compressed request bodies (`X-Content-Encoding: gzip`) so large batches stay within serverless payload limits.
-
----
-
-## Notes & limits
-
-- CN figures use normal captions for topology/IP settings and **Expected output** captions for unexecuted verification panels. Actual Packet Tracer execution and screenshots require a future runner; this release does not fabricate successful runs.
-
-- Serverless functions cap at 60s (`vercel.json`), so very large batches are guarded server-side: `/api/download` rejects more than 200 output units, and Classroom mode is capped at 12 students per run.
-- Terminal output in the document is an image rendered with Pillow; it falls back to plain text if image generation fails.
-- Language validation uses lightweight heuristics, not a full parser — it reliably catches gross mismatches (e.g. C returned for a Python request) but isn't a linter.
-- Project File currently supports Frontend and DBMS. Java, the institutional title-page template, and the reference citation style remain pending.
-```
+Java project reports and an institution-specific title page remain pending; the current project cover uses supplied metadata. Frontend reports retain the existing 10-15 distinct screenshot-result requirement. DBMS reports require declared ERD evidence. All declared images must be attached for final export.

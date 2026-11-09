@@ -12,3 +12,7 @@ js_aims.txt
 # Python
 __pycache__/
 *.py[cod]
+
+# Local test tooling
+.pytest_cache/
+.venv/

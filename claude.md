@@ -10,6 +10,8 @@ CN mode additionally generates eight supported network experiments from determin
 
 Project File mode is a separate report domain for Frontend and DBMS projects. It gives the user a versioned prompt to run in an existing repository-aware AI session, validates the returned JSON context, preserves supplied report prose, fills only blank prose through the shared LLM runner, and exports a convention-locked Word report. Java and the institutional title-page template are pending. See `docs/project-files.md`.
 
+The UI has exactly three main modes: **Project files**, **Lab files**, and **OS/CN/Custom files**. `config.mainMode` tracks these groups; `config.mode` retains internal `project`, `coding`, `os`, `cn`, and `auto` file types for existing generation/export contracts.
+
 ## Stack
 
 | Layer | Tech |
@@ -18,7 +20,7 @@ Project File mode is a separate report domain for Frontend and DBMS projects. It
 | Backend | Python 3.9+ / Flask — single `app.py` |
 | Docs | `python-docx` + Pillow (terminal output rendered to PNG) |
 | PDF | `pypdf` (lazy import; syllabus extraction) |
-| Providers | Groq, Cerebras, FreeModel (OpenAI + Anthropic formats) |
+| AI endpoint | One default Groq model or a custom OpenAI-compatible base URL/model/key |
 | Deploy | Vercel serverless (`vercel.json`) |
 | Tests | pytest + pytest-mock (LLM mocked; runs offline) |
 
@@ -50,9 +52,8 @@ vercel.json
 Order top to bottom:
 
 - **Download payload I/O** — `read_download_payload()` handles gzip + size limits (`MAX_COMPRESSED_DOWNLOAD_BYTES`, `MAX_DECOMPRESSED_DOWNLOAD_BYTES`).
-- **`LLM_PROVIDERS`** — provider config: base URL, env vars, API format (`openai`/`anthropic`), fallback model.
-- **Provider plumbing** — `get_env_values`, `get_provider_keys` (UI key first, then env, deduped), `create_chat_completion` (one HTTP call; takes `temperature`/`top_p`), `build_anthropic_payload`, response parsers.
-- **`run_completion(messages, provider, model, config, keys, temperature, top_p)`** — the shared completion runner. Builds provider attempts (incl. fallbacks via `build_provider_attempts`), rotates keys, backs off on 429, falls back across providers/models. Uses an explicit `result_text` sentinel — **do not** reintroduce the old `'text' in locals()` pattern.
+- **Endpoint configuration** - `resolve_llm_config` resolves one endpoint/model/key across all AI routes. `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` configure server defaults; `GROQ_API_KEY` remains a compatibility fallback. Server credentials apply only to the configured endpoint.
+- **`run_completion`** - one HTTP request using request-local configuration. No cross-provider fallback or key rotation. `create_chat_completion` sends OpenAI-compatible chat completions with a 45-second timeout, rejects redirects, and reports truncated or empty responses. Frontend workflows own retries.
 - **Parsing/validation** — `extract_section` (tag parser with markdown fallback), `LANGUAGE_MARKERS` + `validate_code_language` (heuristic positive/negative markers; unknown language → pass), `validate_generation_result` (rejects empty/too-short responses so a malformed response retries instead of being saved).
 - **`detect_mode_and_language(aim)`** — regex heuristics → `{mode, code_language}`; CN recognition precedes generic OS command cues, while explicit programming-language aims stay in coding mode.
 - **`build_messages(mode, aim, lang, user, host, seed)`** — returns `[system, user]`. **All prompt construction goes through here.** Hard rules (output tags, language lock) live in the system message; aim + variation seed in the user message.
@@ -64,7 +65,7 @@ Order top to bottom:
 ### Endpoint notes
 
 - **CN routes** — `/api/cn/catalog` lists recipes; `/api/cn/plan` returns a canonical plan without previews. `/api/generate` short-circuits for CN before provider/key resolution. Unsupported aims return 400. CN results contain `mode:"cn"` and `execution.status:"not_run"`.
-- **Project routes** — `/api/project/prompt/<submode>` returns the collector; `/api/project/validate` normalizes context; `/api/project/generate` fills only blank prose; `/api/project/download` revalidates and builds the report. Do not route Project File through the experiment parser or `/api/download`.
+- **Project routes** — `/api/project/prompt/<submode>` returns the collector; `/api/project/validate` normalizes context; `/api/project/section` drafts one blank section as plain prose; `/api/project/generate` assembles validated `completed_sections` and supplied prose; `/api/project/download` revalidates and builds the report. Do not route Project File through the experiment parser or `/api/download`.
 - **`/api/generate`** — normalizes UI `mode:'coding'` → `'general'`; `mode:'auto'` (or `auto_detect:true`) routes through `detect_mode_and_language` per request. After parsing it validates the result, and for language-locked modes re-generates once if the code fails `validate_code_language`.
 - **`/api/refine`** — takes the full existing experiment as context and edits it at low temperature (0.3). Preserves the original `aim` in the response.
 - **`/api/classroom-zip`** — backend does **no LLM work**; the frontend generates per-student variations and posts them, the backend builds one `.docx` per student into a ZIP.
@@ -72,13 +73,13 @@ Order top to bottom:
 ## Frontend map (`public/script.js`)
 
 - One module-level `state` object holds everything (`config`, `experiments`, view, flags).
-- **`genContext()`** — resolves provider/model/apiKey (custom model overrides preset). Reuse it; don't re-read the inputs inline.
+- **`genContext()`** — resolves endpoint/model/apiKey from the current fields. Reuse it; don't re-read the inputs inline.
 - **`generateOne(idx)`** — generates a single experiment with a 3-attempt retry. `startGeneration()` runs these in **concurrent batches of 3** (`Promise.all`).
 - **`expIsCn(exp)`** — recognises per-experiment CN records. The complete plan and PNG previews live on `exp.cn`; export sends only aim/profile/mode and the backend rebuilds the record. Session restore preserves student identity.
 - **`expIsOs(exp)`** — an experiment renders OS-style when global mode is OS **or** it has steps (so Auto-mode mixed batches export correctly). Use this, not `state.config.mode === 'os'`, for per-experiment branching.
 - **Session** — `persistSession()` writes to `sessionStorage` after each success and on finish; `maybeOfferRestore`/`restoreSession`/`clearSession` drive the restore banner.
 - **Export** — `getDownloadExperiments`/`getExportUnitCount`/`packExperimentForExport` shape state into the backend schema; `compactOutputForExport` truncates per profile; large payloads are gzipped before POST.
-- **Project File** — `state.projectFile` is separate from aims/experiments. The context bridge loads the collector prompt, validates pasted JSON, stores optional optimized screenshots in memory, and uses dedicated generation/review/export branches. Images are deliberately omitted from session restore.
+- **Project File** — `state.projectFile` is separate from aims/experiments. The context bridge loads the collector prompt, validates pasted JSON, stores optional optimized screenshots in memory, and uses dedicated generation/review/export branches. The compact collector omits long prose; `completedSections` persists incremental drafting progress and allows resume after failures. Editing context clears this cache. Images are deliberately omitted from session restore.
 - **Phase 3 UI** — `autoDetectAims`, `importSyllabusPdf`/`handlePdfImport`, `downloadClassroomZip` (capped at `CLASSROOM_MAX_STUDENTS = 12`).
 
 ## Conventions
@@ -108,5 +109,4 @@ pytest -q
 
 ## Env vars
 
-`GROQ_API_KEY`, `CEREBRAS_API_KEY`, `FREEMODEL_API_KEY`, `FREEMODEL_OPENAI_API_KEY`, `FREEMODEL_ANTHROPIC_API_KEY`. Repeats of the same var in `.env` act as rotation backups. UI-entered key wins over env.
-```
+`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`; `GROQ_API_KEY` for compatibility with the default endpoint. `OPENROUTER_API_KEY` supports the existing optional lab quality gate. See `.env.example` and README for migration from removed provider presets. UI keys override environment keys only for the selected endpoint.

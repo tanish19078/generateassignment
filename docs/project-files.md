@@ -1,18 +1,18 @@
-# Project File mode
+# Project files
 
 Project File turns a structured context pack from an existing repository-aware AI session into a convention-locked Word report. Frontend and DBMS reports are supported. Java is intentionally unavailable until its report convention is defined.
 
 ## Workflow
 
-1. Select **Project File**, then **Frontend** or **DBMS**.
+1. Select **Project files**, then **Frontend** or **DBMS**.
 2. Copy the mode-specific collector prompt from PractiGen.
 3. Paste it into the AI session that already has the project repository in context.
-4. Paste or import the returned JSON context pack.
+4. Paste or import the complete compact JSON context pack. The default collector returns facts only, with blank report prose; it targets under 12,000 characters for Frontend or 24,000 for DBMS without truncating required facts or SQL.
 5. Validate the pack. Required implementation facts must be supplied; PractiGen does not invent them.
 6. Upload PNG/JPEG screenshots using the filenames declared by the context pack. This can wait until export, but every declared image is required in the final document.
-7. Build, review, and export the report.
+7. Build, review, and export the report. Each missing section is a separate request and is saved when complete. Retry resumes remaining sections; session restore also preserves that progress.
 
-The workflow is hybrid. Supplied report prose is preserved. Only blank `report_sections` fields are completed through the configured Groq/Cerebras model. A complete context pack therefore needs no Project File LLM call.
+The workflow is hybrid. Supplied report prose is preserved. Only blank `report_sections` fields are completed through the configured OpenAI-compatible endpoint, as plain prose one section at a time. Word counts guide drafting and do not cause supplied prose to be replaced. A complete context pack therefore needs no Project File LLM call.
 
 ## Trust boundary
 
@@ -69,7 +69,8 @@ The institutional title-page template and reference style are pending. The curre
 |---|---|---|
 | `/api/project/prompt/<submode>` | GET | Return the versioned collector prompt and report format |
 | `/api/project/validate` | POST | Parse, normalize, and validate pasted context JSON |
-| `/api/project/generate` | POST | Preserve supplied prose and complete only blank sections |
+| `/api/project/section` | POST | Generate one requested `section` from validated context; return `{section, text}` |
+| `/api/project/generate` | POST | Assemble supplied prose plus validated `completed_sections`; at most one remaining section may be generated in this request |
 | `/api/project/download` | POST | Revalidate and export a `.docx` report |
 
 Context schema version is currently `1`. Supported `submode` values are `frontend` and `dbms`.
@@ -83,3 +84,9 @@ Context schema version is currently `1`. Supported `submode` values are `fronten
 - Maximum 16 million pixels per image on the server
 
 The browser resizes large images before export. Images are intentionally omitted from session restore and must be selected again after refreshing the page.
+
+## Import and recovery
+
+The importer accepts JSON objects or text with a BOM, Markdown fences, context markers, trailing commas, or literal newlines in strings. Quotes and backslashes within facts and SQL are preserved. It never fills in truncated JSON or invents missing factual fields. A parsing error reports the line and column; request the compact collector response again or import the complete file. The hard limit remains 300,000 characters.
+
+For direct API clients, validate first, call `/api/project/section` for each `generation_needed` field, then submit the returned text keyed by field under `completed_sections` to `/api/project/generate`, along with the original context. Assembly validates saved prose and preserves provenance. The browser performs this sequence automatically. Editing context invalidates cached prose and images.
