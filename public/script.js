@@ -16,6 +16,7 @@ function createEmptyProjectFileState() {
     },
     report: null,
     completedSections: {},
+    sectionParts: {},
     images: [],
     generationStatus: 'idle'
   };
@@ -638,6 +639,7 @@ function markProjectContextStale(rawValue) {
   state.projectFile.normalized = null;
   state.projectFile.report = null;
   state.projectFile.completedSections = {};
+  state.projectFile.sectionParts = {};
   state.projectFile.images = [];
   state.projectFile.generationStatus = 'idle';
   state.projectFile.validation = {
@@ -1137,18 +1139,19 @@ async function startGeneration() {
 
   addGenLog(`Starting generation for ${aims.length} experiment(s)`, 'info');
   addGenLog(state.config.mode === 'cn' ? 'CN templates: addressing, configurations and figures' : `Model: ${model || 'server default'}`, 'info');
-  addGenLog('Concurrency: 3 experiments in parallel', 'info');
+  const batchSize = state.config.mode === 'cn' ? 3 : 1;
+  const generationExperiments = state.experiments;
+  addGenLog(`Concurrency: ${batchSize} experiment(s) at a time`, 'info');
   addGenLog('---', 'info');
 
-  // Enhancement 1 — generate in parallel batches instead of one-at-a-time.
-  const BATCH_SIZE = 3;
-  for (let i = 0; i < state.experiments.length; i += BATCH_SIZE) {
-    if (!state.isGenerating) break;
-    const batch = state.experiments.slice(i, i + BATCH_SIZE);
+  // Custom endpoints may queue or throttle concurrent calls; start with one.
+  for (let i = 0; i < generationExperiments.length; i += batchSize) {
+    if (!state.isGenerating || state.experiments !== generationExperiments) return;
+    const batch = generationExperiments.slice(i, i + batchSize);
     await Promise.all(batch.map((exp) => generateOne(exp.id)));
   }
 
-  finishGeneration();
+  if (state.isGenerating && state.experiments === generationExperiments) finishGeneration();
 }
 
 function renderProjectGenerationCard(status, message) {
@@ -1175,6 +1178,7 @@ async function startProjectGeneration() {
   projectAbortController = typeof AbortController === 'undefined' ? null : new AbortController();
   const signal = projectAbortController?.signal;
   const generatedFields = state.projectFile.validation.generationNeeded || [];
+  state.projectFile.sectionParts ||= {};
   state.isGenerating = true;
   state.generationComplete = false;
   state.projectFile.generationStatus = 'generating';
@@ -1208,22 +1212,36 @@ async function startProjectGeneration() {
       const section = generatedFields[index];
       if (state.projectFile.completedSections[section]) continue;
       const label = section.replaceAll('_', ' ');
-      renderProjectGenerationCard('generating', `Writing ${label} (${index + 1}/${generatedFields.length})...`);
-      const sectionResponse = await fetch('/api/project/section', {
-        method: 'POST', signal,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          submode: state.config.projectSubmode, context: state.projectFile.normalized,
-          section, provider, model, base_url: baseUrl, api_key: apiKey
-        })
-      });
-      const sectionData = await sectionResponse.json().catch(() => ({}));
-      if (requestSequence !== projectGenerationSequence || !state.isGenerating) return;
-      if (!sectionResponse.ok || sectionData.error || !sectionData.text) {
-        throw new Error(`${label}: ${sectionData.error || 'No section returned. The server may have timed out.'} Completed sections are saved; retry to continue.`);
+      const parts = state.projectFile.sectionParts[section] ||= [];
+      while (!state.projectFile.completedSections[section]) {
+        const partIndex = parts.length;
+        renderProjectGenerationCard('generating', `Writing ${label}, part ${partIndex + 1} (${index + 1}/${generatedFields.length} sections)...`);
+        const sectionResponse = await fetch('/api/project/section', {
+          method: 'POST', signal,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            submode: state.config.projectSubmode, context: state.projectFile.normalized,
+            section, part_index: partIndex, previous_parts: parts,
+            provider, model, base_url: baseUrl, api_key: apiKey
+          })
+        });
+        const sectionData = await sectionResponse.json().catch(() => ({}));
+        if (requestSequence !== projectGenerationSequence || !state.isGenerating) return;
+        if (!sectionResponse.ok || sectionData.error || typeof sectionData.text !== 'string' || !sectionData.text.trim()) {
+          const reference = sectionData.request_id ? ` Reference: ${sectionData.request_id}.` : '';
+          throw new Error(`${label}, part ${partIndex + 1}: ${sectionData.error || 'No section returned. The server may have timed out.'}${reference} Completed sections and parts are saved; retry to continue.`);
+        }
+        // Older servers return a complete section without part metadata.
+        const partCount = sectionData.part_count ?? 1;
+        if (!Number.isInteger(partCount) || partCount <= partIndex || partCount > 12
+            || (sectionData.part_index !== undefined && sectionData.part_index !== partIndex)) {
+          throw new Error(`${label}: Invalid section progress returned. Saved work has been preserved.`);
+        }
+        parts.push(sectionData.text);
+        if (parts.length === partCount) state.projectFile.completedSections[section] = parts.join('\n\n');
+        persistSession();
+        addGenLog(`Saved ${label}, part ${parts.length}/${partCount}`, 'success');
       }
-      state.projectFile.completedSections[section] = sectionData.text;
-      persistSession();
       const progress = Math.round(10 + 80 * (index + 1) / generatedFields.length);
       document.getElementById('genProgress').style.width = `${progress}%`;
       document.getElementById('genPercent').textContent = `${progress}%`;
@@ -1293,6 +1311,20 @@ function genContext() {
   return { provider: baseUrl ? 'custom' : 'groq', model, apiKey, baseUrl };
 }
 
+async function readGenerationResponse(response) {
+  const data = await response.json().catch(() => null);
+  const valid = data && typeof data === 'object' && !Array.isArray(data);
+  const usable = valid && (data.mode === 'cn' || (typeof data.concept === 'string' && data.concept.trim()));
+  if (!response.ok || !usable || data.error) {
+    const reference = data?.request_id ? ` Reference: ${data.request_id}.` : '';
+    const error = new Error((data?.error || `Server returned HTTP ${response.status}; no usable response received.`) + reference);
+    error.retryable = data?.retryable !== false && data?.auto_retry !== false
+      && ((response.ok && !usable) || response.status >= 500 || [408, 429].includes(response.status));
+    throw error;
+  }
+  return data;
+}
+
 /**
  * Generate a single experiment (by id) with up to 3 attempts. Resolves
  * independently so cards update as each finishes. Enhancement 1 + Bug 1 retry.
@@ -1300,6 +1332,8 @@ function genContext() {
 async function generateOne(idx) {
   const exp = state.experiments[idx];
   if (!exp || !state.isGenerating) return;
+  const generationExperiments = state.experiments;
+  const isActive = () => state.isGenerating && state.experiments === generationExperiments;
 
   const { provider, model, apiKey, baseUrl } = genContext();
   const autoDetect = state.config.mode === 'auto';
@@ -1312,12 +1346,16 @@ async function generateOne(idx) {
   let attempts = 0;
   const maxAttempts = 3;
 
-  while (attempts < maxAttempts && !success && state.isGenerating) {
+  while (attempts < maxAttempts && !success && isActive()) {
     attempts++;
     if (attempts > 1) {
-      addGenLog(`Retrying experiment ${idx + 1} (attempt ${attempts}/${maxAttempts})...`, 'warn');
+      const delayMs = 2000 * 2 ** (attempts - 2);
+      addGenLog(`Waiting ${delayMs / 1000}s before retrying experiment ${idx + 1} (attempt ${attempts}/${maxAttempts})...`, 'warn');
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      if (!isActive()) return;
     }
 
+    const started = Date.now();
     try {
       const seed = Math.random().toString(36).substring(2, 8);
       const response = await fetch('/api/generate', {
@@ -1340,11 +1378,8 @@ async function generateOne(idx) {
         })
       });
 
-      const data = await response.json();
-      if (data.error) {
-        if (response.status === 400) attempts = maxAttempts;
-        throw new Error(data.error);
-      }
+      const data = await readGenerationResponse(response);
+      if (!isActive()) return;
 
       exp.theory = data.concept || 'No concept description provided.';
       exp.code = data.code || '// No code provided.';
@@ -1364,9 +1399,11 @@ async function generateOne(idx) {
       }
       persistSession();
     } catch (err) {
-      addGenLog(`Experiment ${idx + 1} attempt ${attempts} failed: ${err.message}`, 'error');
-      if (attempts >= maxAttempts) {
+      if (!isActive()) return;
+      addGenLog(`Experiment ${idx + 1} attempt ${attempts} failed after ${((Date.now() - started) / 1000).toFixed(1)}s: ${err.message}`, 'error');
+      if (attempts >= maxAttempts || err.retryable === false) {
         exp.status = 'failed';
+        attempts = maxAttempts;
       }
     }
     renderExpGrid();
@@ -1438,8 +1475,7 @@ async function retryExperiment(idx) {
       })
     });
 
-    const data = await response.json();
-    if (data.error) throw new Error(data.error);
+    const data = await readGenerationResponse(response);
 
     exp.theory = data.concept || 'No concept description provided.';
     exp.code = data.code || '// No code provided.';

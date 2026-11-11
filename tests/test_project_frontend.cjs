@@ -233,8 +233,44 @@ context.normalized = normalized;
   assert.equal(node('created').download, 'Portal_scriptalert1script.docx');
   context.fetch = normalFetch;
 
+  // Save a successful part, fail the next, then restore and resume with the newly selected model.
+  run('state.projectFile.report=null; state.projectFile.validation.generationNeeded=["introduction_background"]; state.projectFile.completedSections={}; state.projectFile.sectionParts={};');
+  const partCalls = [];
+  let failPart = true;
+  const partText = index => `Verified background part ${index + 1} describes the documented project and its scope.`;
+  context.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (url === '/api/project/section') {
+      partCalls.push(body.part_index);
+      assert.deepEqual(body.previous_parts, Array.from({ length: body.part_index }, (_, i) => partText(i)));
+      if (!failPart) assert.equal(body.model, 'new-model');
+      if (body.part_index === 1 && failPart) {
+        return new Response(JSON.stringify({ error: 'Timed out', code: 'llm_timeout', request_id: 'probe-id' }), { status: 504 });
+      }
+      return new Response(JSON.stringify({ section: body.section, text: partText(body.part_index),
+        part_index: body.part_index, part_count: 3 }));
+    }
+    if (url === '/api/project/generate') {
+      assert.equal(body.completed_sections.introduction_background, [0, 1, 2].map(partText).join('\n\n'));
+      return new Response(JSON.stringify({ report: context.report, warnings: [] }));
+    }
+    return normalFetch(url, options);
+  };
+  await run('startProjectGeneration()');
+  assert.equal(run('state.projectFile.sectionParts.introduction_background.length'), 1);
+  assert.equal(run('state.projectFile.completedSections.introduction_background'), undefined);
+  assert.equal(run('state.projectFile.generationStatus'), 'failed');
+  run('state.projectFile=createEmptyProjectFileState(); restoreSession()');
+  node('customModel').value = 'new-model';
+  failPart = false;
+  await run('startProjectGeneration()');
+  assert.deepEqual(partCalls, [0, 1, 1, 2]);
+  assert.equal(run('state.projectFile.generationStatus'), 'complete');
+  context.fetch = normalFetch;
+
   run("markProjectContextStale('{\"changed\":true}')");
   assert.equal(run('state.projectFile.report'), null);
+  assert.equal(run('Object.keys(state.projectFile.sectionParts).length'), 0);
   assert.equal(node('projectGenerateBtn').disabled, true);
 
   run('state.projectFile.normalized=normalized; state.projectFile.report=report; state.projectFile.validation.status="valid"; persistSession()');
@@ -246,6 +282,79 @@ context.normalized = normalized;
   run("selectProjectSubmode('dbms')");
   assert.equal(run('state.config.projectSubmode'), 'dbms');
   assert.equal(run('state.projectFile.report'), null);
+
+  // Lab calls run serially, retry transient errors with a delay, and never retry bad credentials.
+  run('state.config.mode="coding"; state.aimsText="Sort a list\\n---\\nReverse a list";');
+  let inFlight = 0;
+  let peakInFlight = 0;
+  let labCalls = 0;
+  const labResult = { concept: 'Valid explanation', code: 'print(1)', output: '1' };
+  context.fetch = async url => {
+    assert.equal(url, '/api/generate');
+    labCalls++;
+    inFlight++;
+    peakInFlight = Math.max(peakInFlight, inFlight);
+    await Promise.resolve();
+    inFlight--;
+    return new Response(JSON.stringify(labResult));
+  };
+  await run('startGeneration()');
+  assert.equal(labCalls, 2);
+  assert.equal(peakInFlight, 1);
+
+  const retryDelays = [];
+  context.setTimeout = (fn, delay) => { retryDelays.push(delay); fn(); return 1; };
+  labCalls = 0;
+  context.fetch = async () => {
+    labCalls++;
+    if (labCalls < 3) return new Response(JSON.stringify({ error: 'Timed out', retryable: true }), { status: 504 });
+    return new Response(JSON.stringify(labResult));
+  };
+  run('state.isGenerating=true; state.experiments=[{id:0,aim:"Sort",status:"queued"}]');
+  await run('generateOne(0)');
+  assert.equal(labCalls, 3);
+  assert.ok(retryDelays.includes(2000));
+  assert.ok(retryDelays.includes(4000));
+  assert.equal(run('state.experiments[0].status'), 'complete');
+
+  labCalls = 0;
+  context.fetch = async () => { labCalls++; return new Response(JSON.stringify({ error: 'Invalid key' }), { status: 401 }); };
+  run('state.isGenerating=true; state.experiments=[{id:0,aim:"Sort",status:"queued"}]');
+  await run('generateOne(0)');
+  assert.equal(labCalls, 1);
+  assert.equal(run('state.experiments[0].status'), 'failed');
+
+  for (const [code, status] of [['llm_timeout', 504], ['llm_truncated', 502]]) {
+    labCalls = 0;
+    context.fetch = async () => {
+      labCalls++;
+      return new Response(JSON.stringify({ error: 'Adjust model settings before retrying', code,
+        retryable: true, auto_retry: false }), { status });
+    };
+    run('state.isGenerating=true; state.experiments=[{id:0,aim:"Sort",status:"queued"}]');
+    await run('generateOne(0)');
+    assert.equal(labCalls, 1);
+    assert.equal(run('state.experiments[0].status'), 'failed');
+  }
+
+  // A non-JSON server timeout must be treated as a failed request, never as a success.
+  const gatewayFailure = new Response('Gateway timeout', { status: 504 });
+  context.gatewayFailure = gatewayFailure;
+  await assert.rejects(run('readGenerationResponse(gatewayFailure)'), /HTTP 504/);
+  context.emptySuccess = new Response('{}');
+  await assert.rejects(run('readGenerationResponse(emptySuccess)'), /no usable response/);
+  context.badAuth = new Response('Unauthorized', { status: 401 });
+  await assert.rejects(run('readGenerationResponse(badAuth)'), error => error.retryable === false);
+
+  // Late responses after Stop must not overwrite saved experiment state.
+  let finishLab;
+  context.fetch = async () => new Promise(resolve => { finishLab = resolve; });
+  run('state.isGenerating=true; state.experiments=[{id:0,aim:"Sort",status:"queued"}]');
+  const stoppedLab = run('generateOne(0)');
+  run('stopGeneration()');
+  finishLab(new Response(JSON.stringify(labResult)));
+  await stoppedLab;
+  assert.notEqual(run('state.experiments[0].status'), 'complete');
   console.log('Project File frontend contracts passed (mode, prompt, validation, XSS, stale state and restore).');
 })().catch(error => {
   console.error(error);
