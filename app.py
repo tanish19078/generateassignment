@@ -79,6 +79,12 @@ def read_download_payload():
 
 DEFAULT_MODEL = 'openai/gpt-oss-120b'
 DEFAULT_BASE_URL = 'https://api.groq.com/openai/v1'
+# Completion defaults belong to an exact endpoint/model pair, not a provider gallery.
+LLM_MODEL_DEFAULTS = {
+    ('https://integrate.api.nvidia.com/v1', 'nvidia/nemotron-3.5-lightning-30b-a3b'): {
+        'max_output_tokens': 8192, 'reasoning_budget': 1024,
+    },
+}
 LLM_PROVIDERS = {
     'groq': {'label': 'Default endpoint', 'base_url': DEFAULT_BASE_URL,
              'env_vars': ['LLM_API_KEY', 'GROQ_API_KEY'], 'requires_key': True},
@@ -138,9 +144,10 @@ def llm_timeout_seconds():
     return min(value, 285) if os.getenv('VERCEL') else value
 
 
-def llm_max_output_tokens():
+def llm_max_output_tokens(provider_config=None):
+    default = (provider_config or {}).get('max_output_tokens', 4096)
     try:
-        value = int(os.getenv('LLM_MAX_OUTPUT_TOKENS', '4096'))
+        value = int(os.getenv('LLM_MAX_OUTPUT_TOKENS', str(default)))
     except ValueError as err:
         raise LLMConfigurationError('LLM_MAX_OUTPUT_TOKENS must be an integer from 1 to 131072.') from err
     if not 1 <= value <= 131072:
@@ -186,12 +193,16 @@ def resolve_llm_config(data):
     model = str(data.get('model') or server_model or ('' if custom else DEFAULT_MODEL)).strip()
     if not model:
         raise LLMConfigurationError('Enter a model ID for the custom endpoint.')
+    model_defaults = LLM_MODEL_DEFAULTS.get((endpoint, model), {})
     config = {'label': 'Custom endpoint' if custom else 'Default endpoint', 'base_url': endpoint,
               'requires_key': not (endpoint.startswith('http://')), 'env_vars': []}
+    if 'max_output_tokens' in model_defaults:
+        config['max_output_tokens'] = model_defaults['max_output_tokens']
     # This is an optional endpoint-specific parameter, not part of every chat API.
     # A server budget belongs to its configured model as well as its endpoint.
     server_budget = os.getenv('LLM_REASONING_BUDGET') if endpoint == configured_url and model == server_model else None
-    budget = parse_reasoning_budget(data.get('reasoning_budget', server_budget))
+    default_budget = server_budget if server_budget is not None else model_defaults.get('reasoning_budget')
+    budget = parse_reasoning_budget(data.get('reasoning_budget', default_budget))
     if budget is not None:
         config['reasoning_budget'] = budget
     if endpoint == configured_url:
@@ -254,7 +265,7 @@ def create_chat_completion(provider_key, api_key, model, messages, temperature=0
     # The parser consumes a complete JSON response; some gateways default to SSE.
     payload = {'model': model, 'messages': messages, 'temperature': temperature, 'top_p': top_p,
                'stream': False}
-    payload['max_tokens'] = max_tokens if max_tokens is not None else llm_max_output_tokens()
+    payload['max_tokens'] = max_tokens if max_tokens is not None else llm_max_output_tokens(config)
     if reasoning_budget is not None:
         payload['reasoning_budget'] = parse_reasoning_budget(reasoning_budget)
     headers = {'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'PractiGen/6'}
@@ -923,7 +934,7 @@ def api_project_generate():
                                                          part_index=part_index, previous_parts=previous_parts)
             text = run_completion(messages, provider, model, provider_config, keys,
                                   temperature=0.25, top_p=0.9,
-                                  max_tokens=llm_max_output_tokens())
+                                  max_tokens=llm_max_output_tokens(provider_config))
             generated.update(parse_project_generated_sections(text, requested))
         if request.path.endswith('/section'):
             if part_count is not None:

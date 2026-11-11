@@ -55,6 +55,44 @@ def test_server_configuration_and_default_model(monkeypatch):
     assert config['base_url'] == 'https://server.example/v1'
 
 
+@pytest.mark.parametrize('endpoint,model,expected_tokens,expected_reasoning', [
+    ('https://integrate.api.nvidia.com/v1', 'nvidia/nemotron-3.5-lightning-30b-a3b', 8192, 1024),
+    ('https://integrate.api.nvidia.com/v1/chat/completions/', 'nvidia/nemotron-3.5-lightning-30b-a3b', 8192, 1024),
+    ('https://other.example/v1', 'nvidia/nemotron-3.5-lightning-30b-a3b', 4096, None),
+    ('https://integrate.api.nvidia.com/v1', 'another-model', 4096, None),
+])
+def test_browser_selected_model_receives_scoped_completion_defaults(
+        monkeypatch, endpoint, model, expected_tokens, expected_reasoning):
+    monkeypatch.setenv('VERCEL', '1')
+    payloads = []
+    def http(request, timeout):
+        payloads.append(json.loads(request.data))
+        return io.BytesIO(json.dumps({'choices': [{'message': {'content': 'A valid reply'},
+                                                  'finish_reason': 'stop'}]}).encode())
+    monkeypatch.setattr(app.urllib.request, 'build_opener', lambda *args: SimpleNamespace(open=http))
+    provider, model, config, keys = app.resolve_llm_config({
+        'base_url': endpoint, 'model': model, 'api_key': 'fake-key',
+    })
+    # Labs rely on transport defaults; Project passes its resolved cap explicitly.
+    for options in ({}, {'max_tokens': app.llm_max_output_tokens(config)}):
+        assert app.run_completion([], provider, model, config, keys, **options) == 'A valid reply'
+    assert len(payloads) == 2
+    for payload in payloads:
+        assert payload['max_tokens'] == expected_tokens
+        assert payload.get('reasoning_budget') == expected_reasoning
+        assert payload['stream'] is False
+
+
+def test_lightning_defaults_allow_explicit_overrides(monkeypatch):
+    monkeypatch.setenv('LLM_MAX_OUTPUT_TOKENS', '16384')
+    _, _, config, _ = app.resolve_llm_config({
+        'base_url': 'https://integrate.api.nvidia.com/v1',
+        'model': 'nvidia/nemotron-3.5-lightning-30b-a3b', 'api_key': 'fake-key', 'reasoning_budget': None,
+    })
+    assert app.llm_max_output_tokens(config) == 16384
+    assert 'reasoning_budget' not in config
+
+
 def test_chat_endpoint_that_defaults_to_streaming(monkeypatch):
     def http(request, timeout):
         payload = json.loads(request.data)

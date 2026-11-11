@@ -91,6 +91,31 @@ def test_project_truncation_is_502_and_never_returns_partial_prose(client, monke
     assert 'PRIVATE' not in response.get_data(as_text=True)
 
 
+def test_project_browser_request_uses_lightning_budgets_without_server_model_settings(client, monkeypatch):
+    for name in ('LLM_BASE_URL', 'LLM_MODEL', 'LLM_MAX_OUTPUT_TOKENS', 'LLM_REASONING_BUDGET', 'LLM_TIMEOUT_SECONDS'):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv('VERCEL', '1')
+    calls = []
+    def http(request, timeout):
+        payload = json.loads(request.data)
+        calls.append(payload)
+        assert payload['max_tokens'] == 8192
+        assert payload['reasoning_budget'] == 1024
+        assert timeout == 180
+        return io.BytesIO(json.dumps({'choices': [{'finish_reason': 'stop',
+            'message': {'content': prose('background', 260)}}]}).encode())
+    monkeypatch.setattr(app_module.urllib.request, 'build_opener', lambda *args: SimpleNamespace(open=http))
+    response = client.post('/api/project/section', json={
+        'submode': 'frontend', 'context': frontend_context(False),
+        'section': 'introduction_background', 'part_index': 0,
+        'provider': 'custom', 'base_url': 'https://integrate.api.nvidia.com/v1',
+        'model': 'nvidia/nemotron-3.5-lightning-30b-a3b', 'api_key': 'fake-key',
+    })
+    assert response.status_code == 200
+    assert response.get_json()['part_count'] == 3
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize('part_index,previous_parts', [(True, []), (-1, []), (3, []), ('0', []), (1, []), (0, ['x'])])
 def test_invalid_part_progress_never_calls_model(client, monkeypatch, part_index, previous_parts):
     monkeypatch.setattr(app_module, 'run_completion', lambda *a, **k: pytest.fail('Invalid request'))
