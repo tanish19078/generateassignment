@@ -843,7 +843,40 @@ def get_report_format(submode):
     return copy.deepcopy(REPORT_FORMATS[submode])
 
 
-def build_generation_messages(context, missing_fields):
+SECTION_PARTS = {
+    'abstract': [('Summarize the purpose, approach and supported outcomes.', '200-300')],
+    'introduction_background': [
+        ('Introduce the project domain and the documented existing problem.', '250-350'),
+        ('Explain the users, their needs and the relevant technical context.', '250-350'),
+        ('Explain the project scope and how the documented approach addresses those needs.', '250-350')],
+    'introduction_significance': [('Explain the project significance and supported benefits.', '250-400')],
+    'problem_definition': [
+        ('Define the documented problem, affected users and constraints.', '200-350'),
+        ('Explain the objectives and requirements that address the problem.', '200-350')],
+    'design_methodology': [
+        ('Explain the documented development approach and design rationale.', '200-325'),
+        ('Explain the architecture, components and division of responsibilities.', '200-325'),
+        ('Explain the implemented data flow, interfaces and user interactions.', '200-325'),
+        ('Explain documented validation, accessibility, deployment and limitations where supported.', '200-325')],
+    'results_summary': [('Summarize the supplied results and distinguish observations from expectations.', '250-400')],
+    'introduction': [
+        ('Introduce the domain, problem and database project objectives.', '250-400'),
+        ('Explain the database scope, approach and supported benefits.', '250-400')],
+    'erd_description': [
+        ('Explain the documented entities, attributes and keys.', '150-300'),
+        ('Explain relationships, cardinalities and supported design rationale.', '150-300')],
+    'schema_description': [
+        ('Explain the table structure, keys and constraints.', '150-300'),
+        ('Explain how the schema implements relationships and supported normalization.', '150-300')],
+    'use_cases_introduction': [('Introduce the documented use cases and their execution status.', '150-300')],
+}
+
+
+def get_section_parts(field):
+    return SECTION_PARTS[field]
+
+
+def build_generation_messages(context, missing_fields, part_index=None, previous_parts=None):
     submode = context['submode']
     allowed = REPORT_SECTION_FIELDS[submode]
     missing_fields = [field for field in missing_fields if field in allowed]
@@ -863,6 +896,18 @@ def build_generation_messages(context, missing_fields):
         'use_cases_introduction': '150-300 words',
     }
     requested = '\n'.join(f'- {field}: {targets[field]}' for field in missing_fields)
+    continuation = ''
+    if part_index is not None:
+        field = missing_fields[0]
+        parts = get_section_parts(field)
+        focus, words = parts[part_index]
+        requested = f'- {field}, part {part_index + 1} of {len(parts)}: {words} words. {focus}'
+        continuation = ('Write only this part, as complete paragraphs. Do not repeat earlier parts or '
+                        'write a conclusion for the whole report. Other parts will be joined in order.\n'
+                        'SECTION OUTLINE:\n' + '\n'.join(f'{i + 1}. {p[0]}' for i, p in enumerate(parts)))
+        if previous_parts:
+            continuation += ('\nEARLIER DRAFT PARTS (for continuity only, not additional factual evidence):\n'
+                             + '\n\n'.join(previous_parts))
     facts_context = {key: value for key, value in context.items() if key != 'report_sections'}
     facts = json.dumps(facts_context, ensure_ascii=False, separators=(',', ':'))
     system = (
@@ -881,6 +926,8 @@ def build_generation_messages(context, missing_fields):
 Use formal third-person academic prose. Avoid generic filler, repeated conclusions, Markdown headings, and unsupported claims. The structured objectives, requirements, entities, tables, use cases, and results will be rendered separately, so complement rather than duplicate them.
 
 {output_shape}
+
+{continuation}
 
 VALIDATED CONTEXT:
 {facts}

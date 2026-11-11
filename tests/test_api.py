@@ -127,15 +127,46 @@ def test_generate_enforces_language_in_prompt(client, capture):
     assert "python" in system_msg.lower()
 
 
-def test_generate_validates_wrong_language_then_retries(client, capture):
-    # First response returns C code for a Python request -> triggers a correction retry.
+def test_generate_wrong_language_retries_in_a_separate_request(client, capture):
+    # A second model call must not consume the same serverless request budget.
     capture["responses"]["queue"] = [C_RESPONSE, GENERAL_RESPONSE]
     r = client.post("/api/generate", json={
         "aim": "Write a C program for bubble sort", "mode": "coding", "code_language": "python",
     })
-    assert r.status_code == 200
-    assert "bubble_sort" in r.get_json()["code"]
-    assert len(capture["calls"]) == 2  # original + correction retry
+    assert r.status_code == 502
+    assert r.get_json()['retryable'] is True
+    assert len(capture['calls']) == 1
+    retry = client.post('/api/generate', json={
+        'aim': 'Write a C program for bubble sort', 'mode': 'coding', 'code_language': 'python',
+    })
+    assert retry.status_code == 200
+    assert 'bubble_sort' in retry.get_json()['code']
+    assert len(capture['calls']) == 2
+
+
+def test_experiment_timeout_is_a_retryable_gateway_timeout(client, capture, monkeypatch):
+    def fail(*args, **kwargs):
+        raise app_module.LLMTimeoutError(45, 45.1, 'test-reference')
+    monkeypatch.setattr(app_module, 'run_completion', fail)
+    response = client.post('/api/generate', json={
+        'aim': 'List files', 'mode': 'os', 'api_key': 'test-key',
+    })
+    assert response.status_code == 504
+    assert response.get_json()['request_id'] == 'test-reference'
+    assert response.get_json()['code'] == 'llm_timeout'
+
+
+def test_experiment_truncation_is_502_without_automatic_retry(client, capture, monkeypatch):
+    def fail(*args, **kwargs):
+        raise app_module.LLMTruncatedError({'finish_reason': 'length', 'completion_tokens': 4096})
+    monkeypatch.setattr(app_module, 'run_completion', fail)
+    response = client.post('/api/generate', json={
+        'aim': 'Sort', 'mode': 'coding', 'code_language': 'python', 'api_key': 'test-key',
+    })
+    assert response.status_code == 502
+    assert response.get_json()['code'] == 'llm_truncated'
+    assert response.get_json()['auto_retry'] is False
+    assert 'concept' not in response.get_json()
 
 
 def test_generate_rejects_empty_code_response(client, capture):

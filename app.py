@@ -6,9 +6,10 @@ import os
 import gzip
 import zipfile
 import traceback
+import uuid
 import urllib.error
 import urllib.request
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, request, jsonify, send_from_directory, send_file, has_request_context
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -30,6 +31,7 @@ from project_file import (
     build_project_report,
     canonicalize_project_report,
     get_report_format as get_project_report_format,
+    get_section_parts as get_project_section_parts,
     parse_generated_sections as parse_project_generated_sections,
     validate_project_context,
 )
@@ -87,6 +89,65 @@ class LLMConfigurationError(ValueError):
     pass
 
 
+class LLMTimeoutError(RuntimeError):
+    def __init__(self, timeout_seconds, elapsed_seconds, request_id):
+        self.details = {'code': 'llm_timeout', 'retryable': True, 'auto_retry': False,
+                        'timeout_seconds': timeout_seconds,
+                        'elapsed_seconds': round(elapsed_seconds, 2), 'request_id': request_id}
+        super().__init__(f'The AI endpoint did not finish within the {timeout_seconds:g}-second '
+                         'read timeout. Saved work is preserved. Check model availability before retrying.')
+
+
+def llm_timeout_response(error):
+    return jsonify({'error': str(error), **error.details}), 504
+
+
+class LLMTruncatedError(ValueError):
+    def __init__(self, metrics):
+        self.details = {**metrics, 'code': 'llm_truncated', 'retryable': True, 'auto_retry': False}
+        super().__init__('The model response was cut off at the output limit. Increase max output tokens '
+                         'or lower the model\'s reasoning budget before retrying. Saved work is preserved.')
+
+
+def llm_truncated_response(error):
+    return jsonify({'error': str(error), **error.details}), 502
+
+
+def parse_reasoning_budget(value):
+    if value is None or value == '':
+        return None
+    if isinstance(value, str):
+        try:
+            value = int(value)
+        except ValueError:
+            value = None
+    if type(value) is not int or not -1 <= value <= 32768:
+        raise LLMConfigurationError('reasoning_budget must be an integer from -1 to 32768.')
+    return value
+
+
+def llm_timeout_seconds():
+    # Leave headroom inside vercel.json's 300-second Fluid function limit.
+    default = 180 if os.getenv('VERCEL') else 300
+    try:
+        value = int(os.getenv('LLM_TIMEOUT_SECONDS', str(default)))
+    except ValueError as err:
+        raise LLMConfigurationError('LLM_TIMEOUT_SECONDS must be an integer from 1 to 600.') from err
+    if not 1 <= value <= 600:
+        raise LLMConfigurationError('LLM_TIMEOUT_SECONDS must be an integer from 1 to 600.')
+    return min(value, 285) if os.getenv('VERCEL') else value
+
+
+def llm_max_output_tokens():
+    try:
+        value = int(os.getenv('LLM_MAX_OUTPUT_TOKENS', '4096'))
+    except ValueError as err:
+        raise LLMConfigurationError('LLM_MAX_OUTPUT_TOKENS must be an integer from 1 to 131072.') from err
+    if not 1 <= value <= 131072:
+        raise LLMConfigurationError('LLM_MAX_OUTPUT_TOKENS must be an integer from 1 to 131072.')
+    return value
+
+
 @app.errorhandler(LLMConfigurationError)
 def llm_configuration_error(error):
     return jsonify({'error': str(error)}), 400
@@ -127,6 +188,12 @@ def resolve_llm_config(data):
         raise LLMConfigurationError('Enter a model ID for the custom endpoint.')
     config = {'label': 'Custom endpoint' if custom else 'Default endpoint', 'base_url': endpoint,
               'requires_key': not (endpoint.startswith('http://')), 'env_vars': []}
+    # This is an optional endpoint-specific parameter, not part of every chat API.
+    # A server budget belongs to its configured model as well as its endpoint.
+    server_budget = os.getenv('LLM_REASONING_BUDGET') if endpoint == configured_url and model == server_model else None
+    budget = parse_reasoning_budget(data.get('reasoning_budget', server_budget))
+    if budget is not None:
+        config['reasoning_budget'] = budget
     if endpoint == configured_url:
         config['env_vars'] = ['LLM_API_KEY'] + (['GROQ_API_KEY'] if not custom else [])
     keys = get_provider_keys(config, str(data.get('api_key') or '').strip())
@@ -135,12 +202,44 @@ def resolve_llm_config(data):
     return ('custom' if custom else 'groq'), model, config, keys
 
 
-def parse_openai_chat_response(provider_config, body):
+def completion_metrics(parsed):
+    """Only counts and known finish reasons may reach diagnostics; never text."""
+    metrics = {}
+    if not isinstance(parsed, dict):
+        return metrics
+    usage = parsed.get('usage')
+    if isinstance(usage, dict):
+        for field in ('prompt_tokens', 'completion_tokens', 'total_tokens'):
+            if type(usage.get(field)) is int and usage[field] >= 0:
+                metrics[field] = usage[field]
+        details = usage.get('completion_tokens_details')
+        if isinstance(details, dict) and type(details.get('reasoning_tokens')) is int and details['reasoning_tokens'] >= 0:
+            metrics['reasoning_tokens'] = details['reasoning_tokens']
+    choices = parsed.get('choices')
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        reason = choices[0].get('finish_reason')
+        if isinstance(reason, str):
+            metrics['finish_reason'] = reason if reason in ('stop', 'length', 'tool_calls', 'content_filter', 'function_call') else 'other'
+        message = choices[0].get('message')
+        if isinstance(message, dict):
+            content = message.get('content')
+            metrics['content_chars'] = len(content) if isinstance(content, str) else 0
+            for field in ('reasoning_content', 'reasoning'):
+                if isinstance(message.get(field), str):
+                    metrics['reasoning_chars'] = len(message[field])
+                    break
+    return metrics
+
+
+def parse_openai_chat_response(provider_config, body, diagnostic=None):
     try:
         parsed = json.loads(body)
+        metrics = completion_metrics(parsed)
+        if diagnostic is not None:
+            diagnostic.update(metrics)
         choice = parsed['choices'][0]
         if choice.get('finish_reason') == 'length':
-            raise ValueError('The model response was cut off. Increase the endpoint output limit and retry.')
+            raise LLMTruncatedError(metrics)
         content = choice['message']['content']
         if not isinstance(content, str) or not content.strip():
             raise ValueError('The model returned no text. Retry with a text generation model.')
@@ -149,9 +248,15 @@ def parse_openai_chat_response(provider_config, body):
         raise ValueError('The endpoint did not return an OpenAI-compatible chat completion.') from err
 
 
-def create_chat_completion(provider_key, api_key, model, messages, temperature=0.7, top_p=0.9):
+def create_chat_completion(provider_key, api_key, model, messages, temperature=0.7, top_p=0.9,
+                           max_tokens=None, reasoning_budget=None):
     config = provider_key if isinstance(provider_key, dict) else LLM_PROVIDERS[provider_key]
-    payload = {'model': model, 'messages': messages, 'temperature': temperature, 'top_p': top_p}
+    # The parser consumes a complete JSON response; some gateways default to SSE.
+    payload = {'model': model, 'messages': messages, 'temperature': temperature, 'top_p': top_p,
+               'stream': False}
+    payload['max_tokens'] = max_tokens if max_tokens is not None else llm_max_output_tokens()
+    if reasoning_budget is not None:
+        payload['reasoning_budget'] = parse_reasoning_budget(reasoning_budget)
     headers = {'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'PractiGen/6'}
     if api_key:
         headers['Authorization'] = f'Bearer {api_key}'
@@ -162,24 +267,70 @@ def create_chat_completion(provider_key, api_key, model, messages, temperature=0
             # Credentials must never follow a redirect to a different endpoint.
             return None
 
+    timeout = llm_timeout_seconds()
+    started = time.monotonic()
+    request_id = uuid.uuid4().hex
+    diagnostic = {'request_id': request_id, 'model': model,
+                  'request_bytes': len(req.data), 'timeout_seconds': timeout,
+                  'max_tokens': payload['max_tokens']}
+    if 'reasoning_budget' in payload:
+        diagnostic['reasoning_budget'] = payload['reasoning_budget']
+    if has_request_context():
+        request_data = request.get_json(silent=True)
+        if isinstance(request_data, dict):
+            diagnostic['section'] = request_data.get('section')
+            diagnostic['part_index'] = request_data.get('part_index')
+    app.logger.info('llm_request %s', json.dumps(diagnostic))
     try:
         opener = urllib.request.build_opener(NoEndpointRedirects())
-        with opener.open(req, timeout=45) as response:
+        with opener.open(req, timeout=timeout) as response:
+            diagnostic['http_status'] = getattr(response, 'status', 200)
+            response_headers = getattr(response, 'headers', {})
+            diagnostic['provider_request_id'] = (response_headers.get('X-Respan-Log-Id')
+                                                 or response_headers.get('NVCF-REQID')
+                                                 or response_headers.get('X-Request-Id'))
             body = response.read().decode('utf-8')
+        return parse_openai_chat_response(config, body, diagnostic)
+    except LLMTruncatedError as err:
+        diagnostic['error'] = 'llm_truncated'
+        err.details.update(request_id=request_id, max_output_tokens=payload['max_tokens'],
+                           elapsed_seconds=round(time.monotonic() - started, 2))
+        if 'reasoning_budget' in payload:
+            err.details['reasoning_budget'] = payload['reasoning_budget']
+        raise
+    except ValueError:
+        diagnostic['error'] = 'llm_invalid_response'
+        raise
     except urllib.error.HTTPError as err:
+        diagnostic['http_status'] = err.code
         # Do not echo provider bodies, which can contain credentials or private prompts.
         raise RuntimeError(f"{config['label']} API error {err.code}. Check the endpoint, model and key; retry if rate limited.") from err
     except urllib.error.URLError as err:
+        if isinstance(err.reason, TimeoutError):
+            diagnostic['error'] = 'llm_timeout'
+            raise LLMTimeoutError(timeout, time.monotonic() - started, request_id) from err
+        diagnostic['error'] = 'connection_failed'
         raise RuntimeError(f"{config['label']} connection failed. Check the endpoint and try again.") from err
-    return parse_openai_chat_response(config, body)
+    except TimeoutError as err:
+        diagnostic['error'] = 'llm_timeout'
+        raise LLMTimeoutError(timeout, time.monotonic() - started, request_id) from err
+    finally:
+        diagnostic['elapsed_seconds'] = round(time.monotonic() - started, 2)
+        log = app.logger.warning if diagnostic.get('error') or diagnostic.get('http_status', 200) >= 400 else app.logger.info
+        log('llm_result %s', json.dumps(diagnostic))
 
 
-def run_completion(messages, provider, model, provider_config, api_keys, temperature=0.7, top_p=0.9):
-    # One bounded request fits the serverless deadline. The UI owns visible retries.
+def run_completion(messages, provider, model, provider_config, api_keys, temperature=0.7, top_p=0.9,
+                   max_tokens=None):
+    # One provider call per attempt. The UI owns visible retries.
     # Keep request-specific endpoint configuration out of shared globals.
     target = provider_config if provider == 'custom' else provider
-    return create_chat_completion(target, (api_keys or [''])[0], model, messages,
-                                  temperature=temperature, top_p=top_p)
+    options = {'temperature': temperature, 'top_p': top_p}
+    if max_tokens is not None:
+        options['max_tokens'] = max_tokens
+    if provider_config.get('reasoning_budget') is not None:
+        options['reasoning_budget'] = provider_config['reasoning_budget']
+    return create_chat_completion(target, (api_keys or [''])[0], model, messages, **options)
 
 
 def extract_section(tag, text):
@@ -246,7 +397,7 @@ def validate_generation_result(mode, code, concept):
 # never take down /api/generate.
 JEV_ENDPOINT = 'https://openrouter.ai/api/alpha/decisions'
 JEV_MODEL = 'typesafe/jev-1.13'
-JEV_TIMEOUT_SECONDS = 8  # well under the 60s serverless budget
+JEV_TIMEOUT_SECONDS = 8  # leave headroom for the main generation within the function budget
 
 JEV_QUESTIONS = {
     'decision': {
@@ -728,6 +879,11 @@ def api_project_generate():
             }), 400
 
         context = validation['normalized']
+        part_index = data.get('part_index')
+        previous_parts = data.get('previous_parts', [])
+        part_count = None
+        if part_index is not None and not request.path.endswith('/section'):
+            raise ProjectContextError('Part requests must use /api/project/section.')
         missing = validation['generation_needed']
         generated = {}
         completed = data.get('completed_sections', {})
@@ -744,6 +900,17 @@ def api_project_generate():
                 raise ProjectContextError('Choose a valid report section to generate.')
             if context['report_sections'][field]:
                 return jsonify({'section': field, 'text': context['report_sections'][field]})
+            if part_index is not None:
+                part_count = len(get_project_section_parts(field))
+                if type(part_index) is not int or not 0 <= part_index < part_count:
+                    raise ProjectContextError('Choose a valid part_index for this section.')
+                if not isinstance(previous_parts, list) or len(previous_parts) != part_index:
+                    raise ProjectContextError('previous_parts must contain each completed part in order.')
+                previous_parts = [parse_project_generated_sections(
+                    json.dumps({'report_sections': {field: value}}), [field])[field]
+                    for value in previous_parts]
+                if sum(map(len, previous_parts)) > 45_000:
+                    raise ProjectContextError('Saved section parts are too large.')
             requested = [field]
         else:
             requested = [field for field in missing if field not in generated]
@@ -752,11 +919,16 @@ def api_project_generate():
                                 'generation_needed': requested}), 400
         if requested:
             provider, model, provider_config, keys = resolve_llm_config(data)
-            messages = build_project_generation_messages(context, requested)
+            messages = build_project_generation_messages(context, requested,
+                                                         part_index=part_index, previous_parts=previous_parts)
             text = run_completion(messages, provider, model, provider_config, keys,
-                                  temperature=0.25, top_p=0.9)
+                                  temperature=0.25, top_p=0.9,
+                                  max_tokens=llm_max_output_tokens())
             generated.update(parse_project_generated_sections(text, requested))
         if request.path.endswith('/section'):
+            if part_count is not None:
+                return jsonify({'section': field, 'text': generated[field],
+                                'part_index': part_index, 'part_count': part_count})
             return jsonify({'section': field, 'text': generated[field]})
 
         report = build_project_report(context, generated, missing)
@@ -769,6 +941,10 @@ def api_project_generate():
         return jsonify({'error': str(err)}), 400
     except ProjectGenerationError as err:
         return jsonify({'error': str(err)}), 502
+    except LLMTruncatedError as err:
+        return llm_truncated_response(err)
+    except LLMTimeoutError as err:
+        return llm_timeout_response(err)
     except Exception as err:
         error_msg = str(err)
         status_code = 500
@@ -954,29 +1130,12 @@ def api_generate():
         result = parse_generation_text(text, mode, target_language)
         validate_generation_result(mode, result.get('code'), result.get('concept'))
 
-        # Bug 5 — verify the generated code is actually in the requested language.
-        # If not, retry once with an explicit correction instruction.
+        # A correction must be a new frontend attempt, not a second AI call
+        # inside the same serverless request.
         if mode in ('general', 'language') and target_language:
             if not validate_code_language(result.get('code', ''), target_language):
-                print(f"Language validation failed for {target_language}. Retrying with correction...")
-                correction = (
-                    f"The previous attempt produced code in the WRONG language. "
-                    f"Rewrite this experiment using ONLY {target_language}."
-                )
-                retry_messages = build_messages(
-                    mode, f"{correction}\n\nOriginal aim: {aim}",
-                    target_language, terminal_user, terminal_host, variation_seed,
-                )
-                text = run_completion(
-                    retry_messages, provider, model, selected_provider_config, selected_api_keys,
-                    temperature=0.5, top_p=0.9,
-                )
-                result = parse_generation_text(text, mode, target_language)
-                validate_generation_result(mode, result.get('code'), result.get('concept'))
-                if not validate_code_language(result.get('code', ''), target_language):
-                    raise ValueError(
-                        f"LLM repeatedly produced code in the wrong language (expected {target_language})."
-                    )
+                return jsonify({'error': f'The model returned the wrong code language (expected {target_language}). Retry this experiment.',
+                                'code': 'wrong_code_language', 'retryable': True}), 502
 
         # Advisory quality gate — on by default, opt out with jev_quality_gate:false.
         # `result` is already parsed and validated here, so the gate can only add
@@ -989,6 +1148,10 @@ def api_generate():
                 print(f"Jev quality gate skipped: {type(gate_error).__name__}: {gate_error}")
 
         return jsonify(result)
+    except LLMTruncatedError as err:
+        return llm_truncated_response(err)
+    except LLMTimeoutError as err:
+        return llm_timeout_response(err)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except LLMConfigurationError:
@@ -1089,6 +1252,10 @@ def api_refine():
         validate_generation_result(mode, result.get('code'), result.get('concept'))
         result['aim'] = aim  # preserve the original aim, not the change request
         return jsonify(result)
+    except LLMTruncatedError as err:
+        return llm_truncated_response(err)
+    except LLMTimeoutError as err:
+        return llm_timeout_response(err)
     except LLMConfigurationError:
         raise
     except Exception as e:
@@ -1177,6 +1344,10 @@ def api_extract_aims():
             aims = [line.strip(' \t\r\n-•.') for line in text.splitlines() if len(line.strip()) > 8]
 
         return jsonify({'aims': aims, 'text': '\n---\n'.join(aims)})
+    except LLMTruncatedError as err:
+        return llm_truncated_response(err)
+    except LLMTimeoutError as err:
+        return llm_timeout_response(err)
     except LLMConfigurationError:
         raise
     except Exception as e:

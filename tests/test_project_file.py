@@ -2,6 +2,7 @@ import base64
 import gzip
 import io
 import json
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -15,6 +16,89 @@ import app as app_module
 def prose(topic, words):
     vocabulary = (f'{topic} implementation architecture evidence workflow analysis design '.split())
     return ' '.join(vocabulary[index % len(vocabulary)] for index in range(words)) + '.'
+
+
+def test_project_socket_timeout_returns_retryable_504(client, monkeypatch):
+    monkeypatch.delenv('VERCEL', raising=False)
+    monkeypatch.setenv('LLM_TIMEOUT_SECONDS', '90')
+    def http(*args, **kwargs):
+        raise TimeoutError('The read operation timed out')
+    monkeypatch.setattr(app_module.urllib.request, 'build_opener',
+                        lambda *args: SimpleNamespace(open=http))
+    response = client.post('/api/project/section', json={
+        'submode': 'frontend', 'context': frontend_context(False),
+        'section': 'introduction_background', 'part_index': 0, 'api_key': 'test-key',
+    })
+    assert response.status_code == 504
+    result = response.get_json()
+    assert result['code'] == 'llm_timeout'
+    assert result['timeout_seconds'] == 90
+    assert result['retryable'] is True
+    assert result['request_id']
+    assert 'test-key' not in response.get_data(as_text=True)
+
+
+def test_long_section_parts_preserve_continuity_and_assemble(client, monkeypatch):
+    context = frontend_context()
+    context['report_sections']['introduction_background'] = ''
+    calls = []
+    def completion(messages, *args, **kwargs):
+        calls.append(messages)
+        assert kwargs['max_tokens'] == 4096
+        return prose(f'part-{len(calls)}', 260)
+    monkeypatch.setattr(app_module, 'run_completion', completion)
+    parts = []
+    for index in range(3):
+        response = client.post('/api/project/section', json={
+            'submode': 'frontend', 'context': context, 'section': 'introduction_background',
+            'part_index': index, 'previous_parts': parts, 'api_key': 'test-key',
+        })
+        assert response.status_code == 200
+        result = response.get_json()
+        assert (result['part_index'], result['part_count']) == (index, 3)
+        assert f'part {index + 1} of 3: 250-350 words' in calls[-1][1]['content']
+        if parts:
+            assert parts[-1] in calls[-1][1]['content']
+        parts.append(result['text'])
+    monkeypatch.setattr(app_module, 'run_completion', lambda *a, **k: pytest.fail('No regeneration'))
+    response = client.post('/api/project/generate', json={
+        'submode': 'frontend', 'context': context,
+        'completed_sections': {'introduction_background': '\n\n'.join(parts)},
+    })
+    assert response.status_code == 200
+    sections = response.get_json()['report']['report_sections']
+    assert sections['introduction_background'] == '\n\n'.join(parts)
+    assert sections['abstract'] == context['report_sections']['abstract']
+
+
+def test_project_truncation_is_502_and_never_returns_partial_prose(client, monkeypatch):
+    def http(*args, **kwargs):
+        return io.BytesIO(json.dumps({'choices': [{'finish_reason': 'length',
+            'message': {'content': 'PRIVATE partial section'}}],
+            'usage': {'completion_tokens': 4096}}).encode())
+    monkeypatch.setattr(app_module.urllib.request, 'build_opener', lambda *args: SimpleNamespace(open=http))
+    response = client.post('/api/project/section', json={
+        'submode': 'frontend', 'context': frontend_context(False),
+        'section': 'introduction_background', 'part_index': 0, 'api_key': 'fake-key',
+    })
+    assert response.status_code == 502
+    body = response.get_json()
+    assert body['code'] == 'llm_truncated'
+    assert body['auto_retry'] is False
+    assert body['request_id']
+    assert body['completion_tokens'] == 4096
+    assert 'text' not in body
+    assert 'PRIVATE' not in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize('part_index,previous_parts', [(True, []), (-1, []), (3, []), ('0', []), (1, []), (0, ['x'])])
+def test_invalid_part_progress_never_calls_model(client, monkeypatch, part_index, previous_parts):
+    monkeypatch.setattr(app_module, 'run_completion', lambda *a, **k: pytest.fail('Invalid request'))
+    response = client.post('/api/project/section', json={
+        'submode': 'frontend', 'context': frontend_context(False), 'section': 'introduction_background',
+        'part_index': part_index, 'previous_parts': previous_parts,
+    })
+    assert response.status_code == 400
 
 
 def frontend_context(with_sections=True):

@@ -8,6 +8,7 @@ from .reports import (
     build_project_report,
     canonicalize_project_report,
     get_report_format,
+    get_section_parts,
     parse_generated_sections,
     validate_project_context,
 )
@@ -22,6 +23,7 @@ __all__ = [
     'build_project_report',
     'canonicalize_project_report',
     'get_report_format',
+    'get_section_parts',
     'parse_generated_sections',
     'validate_project_context',
 ]
