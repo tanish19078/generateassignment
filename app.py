@@ -82,7 +82,9 @@ DEFAULT_BASE_URL = 'https://api.groq.com/openai/v1'
 # Completion defaults belong to an exact endpoint/model pair, not a provider gallery.
 LLM_MODEL_DEFAULTS = {
     ('https://integrate.api.nvidia.com/v1', 'nvidia/nemotron-3.5-lightning-30b-a3b'): {
-        'max_output_tokens': 8192, 'reasoning_budget': 1024,
+        # NVIDIA supports up to 32768 output tokens. Keep reasoning bounded:
+        # a larger output ceiling avoids truncation but does not force longer replies.
+        'max_output_tokens': 32768, 'reasoning_budget': 1024,
     },
 }
 LLM_PROVIDERS = {

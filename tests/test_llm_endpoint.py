@@ -56,8 +56,8 @@ def test_server_configuration_and_default_model(monkeypatch):
 
 
 @pytest.mark.parametrize('endpoint,model,expected_tokens,expected_reasoning', [
-    ('https://integrate.api.nvidia.com/v1', 'nvidia/nemotron-3.5-lightning-30b-a3b', 8192, 1024),
-    ('https://integrate.api.nvidia.com/v1/chat/completions/', 'nvidia/nemotron-3.5-lightning-30b-a3b', 8192, 1024),
+    ('https://integrate.api.nvidia.com/v1', 'nvidia/nemotron-3.5-lightning-30b-a3b', 32768, 1024),
+    ('https://integrate.api.nvidia.com/v1/chat/completions/', 'nvidia/nemotron-3.5-lightning-30b-a3b', 32768, 1024),
     ('https://other.example/v1', 'nvidia/nemotron-3.5-lightning-30b-a3b', 4096, None),
     ('https://integrate.api.nvidia.com/v1', 'another-model', 4096, None),
 ])

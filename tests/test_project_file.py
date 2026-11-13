@@ -99,7 +99,7 @@ def test_project_browser_request_uses_lightning_budgets_without_server_model_set
     def http(request, timeout):
         payload = json.loads(request.data)
         calls.append(payload)
-        assert payload['max_tokens'] == 8192
+        assert payload['max_tokens'] == 32768
         assert payload['reasoning_budget'] == 1024
         assert timeout == 180
         return io.BytesIO(json.dumps({'choices': [{'finish_reason': 'stop',
