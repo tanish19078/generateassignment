@@ -870,7 +870,7 @@ async function prepareProjectImage(file) {
 }
 
 function getProjectImageMetadata(filename) {
-  const normalized = state.projectFile.normalized;
+  const normalized = state.projectFile.normalized || state.projectFile.report?.context;
   const cleanName = String(filename || '').replace(/\\/g, '/').split('/').pop().toLowerCase();
   if (!normalized) return null;
   const declared = (normalized.figures || []).find(item => {
@@ -929,7 +929,11 @@ function removeProjectImage(index) {
   renderProjectImages();
 }
 
-function getDeclaredProjectImages() {
+function isProjectErdSection(section) {
+  return ['erd', 'e-r diagram'].includes(String(section || '').trim().toLowerCase());
+}
+
+function getDeclaredProjectImages(requiredOnly = false) {
   const normalized = state.projectFile.normalized || state.projectFile.report?.context;
   const declarations = new Map();
   const add = (filename) => {
@@ -937,7 +941,9 @@ function getDeclaredProjectImages() {
     if (value) declarations.set(value.toLowerCase(), value);
   };
   if (!normalized) return declarations;
-  (normalized.figures || []).forEach(figure => add(figure.filename));
+  (normalized.figures || []).forEach(figure => {
+    if (!(requiredOnly && normalized.submode === 'dbms' && isProjectErdSection(figure.section))) add(figure.filename);
+  });
   if (normalized.submode === 'frontend') {
     (normalized.project?.results || []).forEach(result => add(result.screenshot_filename));
   } else {
@@ -948,7 +954,7 @@ function getDeclaredProjectImages() {
 
 function getMissingProjectImages() {
   const uploaded = new Set(state.projectFile.images.map(image => image.filename.toLowerCase()));
-  return [...getDeclaredProjectImages().entries()]
+  return [...getDeclaredProjectImages(true).entries()]
     .filter(([key]) => !uploaded.has(key))
     .map(([, filename]) => filename);
 }
@@ -956,11 +962,16 @@ function getMissingProjectImages() {
 function renderProjectExportImageStatus() {
   const status = document.getElementById('projectExportImageStatus');
   if (!status) return;
-  const declared = getDeclaredProjectImages();
+  const declared = getDeclaredProjectImages(true);
   const missing = getMissingProjectImages();
+  const uploadedCount = declared.size - missing.length;
   status.textContent = missing.length
-    ? `${state.projectFile.images.length} of ${declared.size} uploaded. Missing: ${missing.join(', ')}`
-    : `${state.projectFile.images.length} of ${declared.size} required images uploaded.`;
+    ? `${uploadedCount} of ${declared.size} uploaded. Missing: ${missing.join(', ')}`
+    : `${uploadedCount} of ${declared.size} required images uploaded.`;
+  if (state.config.projectSubmode === 'dbms') {
+    status.textContent += getUploadedProjectErds().length
+      ? ' Your uploaded E-R diagram will be used.' : ' The E-R diagram is included automatically.';
+  }
   document.getElementById('projectExportImageButton').disabled = state.projectFile.validation.status !== 'valid';
   if (state.config.mode === 'project') document.getElementById('downloadBtn').disabled = missing.length > 0;
 }
@@ -978,6 +989,7 @@ function renderProjectImages() {
     </span>`).join('') : '<span class="helper">No images selected.</span>';
   containers.forEach(container => { container.innerHTML = content; });
   renderProjectExportImageStatus();
+  if (state.config.mode === 'project' && state.projectFile.report?.submode === 'dbms') renderProjectReview();
 }
 
 /* ============================
@@ -1583,6 +1595,80 @@ function downloadCnPlan(index) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function projectReportWithoutPreviews(report) {
+  if (!report) return report;
+  const { erd_diagrams, ...rest } = report;
+  return rest;
+}
+
+function getUploadedProjectErds() {
+  return state.projectFile.images.filter(image => isProjectErdSection(getProjectImageMetadata(image.filename)?.section));
+}
+
+let projectPreviewRequest = { report: null, status: 'idle', error: '' };
+
+async function refreshProjectDiagrams() {
+  const report = state.projectFile.report;
+  if (!report || report.submode !== 'dbms') return;
+  if (projectPreviewRequest.report === report && projectPreviewRequest.status === 'loading') return;
+  projectPreviewRequest = { report, status: 'loading', error: '' };
+  if (state.config.mode === 'project') renderProjectReview();
+  try {
+    const response = await fetch('/api/project/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report: projectReportWithoutPreviews(report) })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (state.projectFile.report !== report) return;
+    if (!response.ok || data.error) throw new Error(data.error || `Could not load the diagram (HTTP ${response.status}).`);
+    if (!Array.isArray(data.report?.erd_diagrams) || !data.report.erd_diagrams.length) {
+      throw new Error('The diagram preview was empty. Try loading it again.');
+    }
+    state.projectFile.report = data.report;
+    projectPreviewRequest = { report: data.report, status: 'ready', error: '' };
+    persistSession();
+  } catch (err) {
+    if (state.projectFile.report !== report) return;
+    projectPreviewRequest = { report, status: 'failed', error: err.message };
+  }
+  if (state.config.mode === 'project' && (state.projectFile.report === report || state.projectFile.report === projectPreviewRequest.report)) renderProjectReview();
+}
+
+function toggleProjectDiagramZoom(button) {
+  const zoomed = button.closest('.project-erd-figure').classList.toggle('zoomed');
+  button.setAttribute('aria-pressed', String(zoomed));
+  button.textContent = zoomed ? 'Fit diagram' : 'Zoom diagram';
+}
+
+function renderProjectErd(report) {
+  const uploaded = getUploadedProjectErds();
+  const figures = uploaded.length ? uploaded.map((image, index) => ({
+    id: `uploaded-erd-${index + 1}`, caption: getProjectImageMetadata(image.filename)?.caption || image.filename,
+    data_url: `data:${image.media_type};base64,${image.data_base64}`
+  })) : report.erd_diagrams || [];
+  const diagramHtml = figures.map((figure, index) => {
+    const source = /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(figure.data_url || '') ? figure.data_url : '';
+    if (!source) return '<p class="helper">This diagram image is unavailable.</p>';
+    return `<figure class="project-erd-figure">
+      <div class="project-erd-viewport" tabindex="0" role="region" aria-label="${escapeHtml(figure.caption)}"><img src="${source}" alt="${escapeHtml(figure.caption)}" loading="lazy"></div>
+      <figcaption><span>${escapeHtml(figure.caption)}</span><button type="button" onclick="toggleProjectDiagramZoom(this)" aria-pressed="false">Zoom diagram</button><a href="${source}" download="erd-${index + 1}.${source.startsWith('data:image/jpeg') ? 'jpg' : 'png'}">Download full-size image</a></figcaption>
+    </figure>`;
+  }).join('');
+  const dbms = report.context.dbms;
+  const relationships = (dbms.relationships || []).map((item, index) => `<tr><th scope="row">R${index + 1}</th><td>${escapeHtml(item.from_entity)}</td><td>${escapeHtml(item.to_entity)}</td><td>${escapeHtml(item.cardinality)}</td><td>${escapeHtml(item.description)}</td></tr>`).join('');
+  const entities = (dbms.entities || []).map(entity => `<tr><th scope="row">${escapeHtml(entity.name)}</th><td>${(entity.attributes || []).map(attr => escapeHtml([attr.name, attr.data_type, attr.key, attr.constraints].filter(Boolean).join(' · '))).join('<br>')}</td></tr>`).join('');
+  const loading = projectPreviewRequest.report === report && projectPreviewRequest.status === 'loading';
+  const error = projectPreviewRequest.report === report ? projectPreviewRequest.error : '';
+  const empty = loading ? '<p class="helper" role="status">Loading the E-R diagram…</p>'
+    : `<p class="helper" role="status">${escapeHtml(error || 'Load the E-R diagram for this saved report.')}</p><button type="button" class="btn btn-secondary" onclick="refreshProjectDiagrams()">Load diagram</button>`;
+  return `<div class="project-erd">
+    <p class="helper">${uploaded.length ? 'Your uploaded diagram will appear in the Word report.' : 'Drawn from your project entities and relationships. Repeated entity names refer to the same entity across figures.'}</p>
+    ${diagramHtml || empty}
+    <details class="project-erd-details"><summary>Relationships and cardinalities</summary><div class="project-erd-table"><table><thead><tr><th>ID</th><th>From entity</th><th>To entity</th><th>Cardinality</th><th>Description</th></tr></thead><tbody>${relationships}</tbody></table></div></details>
+    <details class="project-erd-details"><summary>All entities and attributes</summary><div class="project-erd-table"><table><thead><tr><th>Entity</th><th>Attributes, types and keys</th></tr></thead><tbody>${entities}</tbody></table></div></details>
+  </div>`;
+}
+
 function renderProjectReview() {
   const report = state.projectFile.report;
   document.getElementById('reviewTitle').textContent = 'Review Project Report';
@@ -1633,10 +1719,13 @@ function renderProjectReview() {
             <i aria-hidden="true" class="fas fa-chevron-down accordion-chevron ${isOpen ? 'open' : ''}"></i>
           </button>
           <div class="accordion-body ${isOpen ? 'open' : ''}">
-            <div class="project-review-body"><p>${escapeHtml(report.report_sections[key])}</p></div>
+            <div class="project-review-body">${key === 'erd_description' ? renderProjectErd(report) : ''}<p>${escapeHtml(key === 'erd_description' && !report.erd_diagrams?.length ? '' : report.report_sections[key])}</p></div>
           </div>
         </div>`;
     }).join('');
+  if (report.submode === 'dbms' && !report.erd_diagrams?.length && projectPreviewRequest.report !== report) {
+    refreshProjectDiagrams();
+  }
 }
 
 function toggleProjectSection(index) {
@@ -2008,7 +2097,7 @@ async function downloadProjectDocument() {
     const images = state.projectFile.images.map(({ bytes, ...image }) => image);
     const payload = {
       submode: state.config.projectSubmode,
-      report,
+      report: projectReportWithoutPreviews(report),
       images,
       output_filename: projectOutputFilename()
     };
@@ -2388,6 +2477,7 @@ function persistSession() {
     const projectFile = {
       ...state.projectFile,
       generationStatus: state.projectFile.report ? 'complete' : 'idle',
+      report: projectReportWithoutPreviews(state.projectFile.report),
       prompt: '',
       images: []
     };

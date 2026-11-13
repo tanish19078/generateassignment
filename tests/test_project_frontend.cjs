@@ -283,6 +283,68 @@ context.normalized = normalized;
   assert.equal(run('state.config.projectSubmode'), 'dbms');
   assert.equal(run('state.projectFile.report'), null);
 
+  // DBMS diagrams work for every report and never count as missing screenshots.
+  const dbmsContext = {
+    submode: 'dbms', project: { title: 'Library' },
+    dbms: {
+      entities: [{ name: 'Member <script>', attributes: [{ name: 'id', data_type: 'int', key: 'PK' }] }, { name: 'Book', attributes: [] }],
+      relationships: [{ from_entity: 'Member <script>', to_entity: 'Book', cardinality: 'M:N', description: 'Borrowing <img onerror=alert(1)>' }],
+      tables: [{ name: 'members' }, { name: 'books' }], use_cases: [{ screenshot_filename: 'query.png' }],
+    },
+    figures: [{ filename: 'erd.png', caption: 'Uploaded ERD', section: 'erd' }],
+  };
+  context.dbmsReport = {
+    submode: 'dbms', title: 'Library', context: dbmsContext,
+    report_sections: { introduction: 'Introduction', erd_description: 'A factual description.', schema_description: 'Schema', use_cases_introduction: 'Queries' },
+    erd_diagrams: [{ caption: 'Generated E-R <diagram>', data_url: 'data:image/png;base64,YWJj' }],
+  };
+  run('state.config.mode="project"; state.projectFile.report=dbmsReport; state.projectFile.normalized=dbmsReport.context; state.projectFile.validation.status="valid"; state.projectFile.images=[]; renderProjectReview(); renderProjectExportImageStatus()');
+  assert.deepEqual(Array.from(run('getMissingProjectImages()')), ['query.png']);
+  assert.equal(node('downloadBtn').disabled, true);
+  assert.ok(node('reviewAccordion').innerHTML.includes('class="project-erd-figure"'));
+  assert.ok(node('reviewAccordion').innerHTML.includes('&lt;diagram&gt;'));
+  assert.ok(node('reviewAccordion').innerHTML.includes('&lt;img onerror='));
+  assert.ok(!node('reviewAccordion').innerHTML.includes('<img onerror='));
+  assert.ok(!node('reviewAccordion').innerHTML.includes('Member <script>'));
+  run('state.projectFile.images=[{filename:"query.png", bytes:3}]; renderProjectExportImageStatus()');
+  assert.equal(node('downloadBtn').disabled, false);
+  assert.ok(node('projectExportImageStatus').textContent.includes('included automatically'));
+  run('state.projectFile.images.push({filename:"erd.png",media_type:"image/png",data_base64:"ZGVm",bytes:3}); renderProjectImages()');
+  assert.ok(node('reviewAccordion').innerHTML.includes('Uploaded ERD'));
+  assert.ok(!node('reviewAccordion').innerHTML.includes('Generated E-R &lt;diagram&gt;'));
+  assert.ok(node('projectExportImageStatus').textContent.includes('1 of 1 required'));
+  run('state.projectFile.images.pop(); renderProjectImages(); persistSession()');
+  assert.ok(node('reviewAccordion').innerHTML.includes('Generated E-R &lt;diagram&gt;'));
+  const savedDbms = JSON.parse(stored.get('practigen_session_v6'));
+  assert.equal(savedDbms.projectFile.report.erd_diagrams, undefined);
+  assert.equal(savedDbms.projectFile.images.length, 0);
+
+  // Restored diagrams use a no-AI preview call, with no keys or large preview bytes.
+  let finishPreview;
+  let previewCalls = 0;
+  context.fetch = async (url, options) => {
+    assert.equal(url, '/api/project/preview');
+    assert.equal(JSON.parse(options.body).report.erd_diagrams, undefined);
+    assert.ok(!options.body.includes('api_key'));
+    previewCalls++;
+    return new Promise(resolve => { finishPreview = resolve; });
+  };
+  run('state.projectFile.report=projectReportWithoutPreviews(dbmsReport)');
+  const pendingPreview = run('refreshProjectDiagrams()');
+  await run('refreshProjectDiagrams()');
+  assert.equal(previewCalls, 1);
+  assert.ok(node('reviewAccordion').innerHTML.includes('Loading the E-R diagram'));
+  finishPreview(new Response(JSON.stringify({ report: context.dbmsReport })));
+  await pendingPreview;
+  assert.ok(node('reviewAccordion').innerHTML.includes('Generated E-R &lt;diagram&gt;'));
+  run('state.projectFile.report=projectReportWithoutPreviews(dbmsReport)');
+  const stalePreview = run('refreshProjectDiagrams()');
+  run('state.projectFile.report=null');
+  finishPreview(new Response(JSON.stringify({ report: context.dbmsReport })));
+  await stalePreview;
+  assert.equal(run('state.projectFile.report'), null);
+  context.fetch = normalFetch;
+
   // Lab calls run serially, retry transient errors with a delay, and never retry bad credentials.
   run('state.config.mode="coding"; state.aimsText="Sort a list\\n---\\nReverse a list";');
   let inFlight = 0;

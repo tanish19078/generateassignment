@@ -43,3 +43,23 @@
 .accordion-toggle { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; padding: 0; background: none; border: 0; color: var(--text); text-align: left; }
 
 @media (hover: hover) { .mode-card:hover { border-color: var(--accent-ink); background: #fff8f6; } }
+
+.project-erd { margin-bottom: 20px; min-width: 0; }
+.project-erd > .helper { margin-bottom: 14px; line-height: 1.7; }
+.project-erd-figure { margin: 0 0 18px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: white; }
+.project-erd-figure img { display: block; width: 100%; height: auto; }
+.project-erd-viewport { overflow: auto; max-height: 75vh; }
+.project-erd-figure.zoomed img { width: auto; max-width: none; }
+.project-erd-figure figcaption { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; padding: 12px 14px; background: var(--surface-soft); color: var(--text-sec); font-size: 12px; line-height: 1.6; }
+.project-erd-figure figcaption a { color: var(--accent-ink); text-decoration: underline; }
+.project-erd-figure figcaption button { color: var(--accent-ink); text-decoration: underline; background: none; border: 0; cursor: pointer; font: inherit; padding: 0; }
+.project-erd-details { border-top: 1px solid var(--border); padding: 12px 0; font-size: 13px; }
+.project-erd-details summary { cursor: pointer; font-weight: 600; }
+.project-erd-table { overflow-x: auto; margin-top: 12px; }
+.project-erd-table table { border-collapse: collapse; width: 100%; text-align: left; font-size: 12px; }
+.project-erd-table th, .project-erd-table td { padding: 10px; border: 1px solid var(--border); vertical-align: top; min-width: 80px; overflow-wrap: anywhere; }
+.project-erd-table th { background: var(--surface-soft); }
+@media (max-width: 600px) {
+  .project-review-body { padding-inline: 12px; }
+  .project-erd-figure figcaption { padding: 10px; font-size: 11px; }
+}

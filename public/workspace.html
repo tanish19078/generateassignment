@@ -120,7 +120,7 @@
           <section class="card project-screenshot-card">
             <div>
               <h3><i class="fas fa-images"></i> Report figures and screenshots</h3>
-              <p>Optional during generation, but required for screenshot-led results. PNG/JPEG files are resized locally and matched by filename from the context pack.</p>
+              <p>Attach the screenshots named in your context pack before export. DBMS E-R diagrams are drawn automatically; an uploaded E-R image can replace them. PNG/JPEG files are matched by filename.</p>
             </div>
             <button type="button" class="btn btn-secondary" id="projectImageButton" onclick="document.getElementById('projectImageInput').click()"><i class="fas fa-upload"></i> Add Images</button>
             <input type="file" id="projectImageInput" accept="image/png,image/jpeg" multiple style="display:none;" onchange="handleProjectImages(event)">
