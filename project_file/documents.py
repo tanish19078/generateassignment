@@ -13,6 +13,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
 from .reports import ProjectContextError
+from .diagrams import ERD_SECTIONS, build_erd_figures
 
 
 MAX_IMAGES = 16
@@ -234,7 +235,9 @@ def _canonicalize_images(report, images):
         raise ProjectContextError(
             'Uploaded images were not declared by the context pack: ' + ', '.join(undeclared)
         )
-    missing = sorted(item['filename'] for key, item in declarations.items() if key not in images)
+    missing = sorted(item['filename'] for key, item in declarations.items()
+                     if key not in images and not (
+                         report['submode'] == 'dbms' and item['section'].lower() in ERD_SECTIONS))
     if missing:
         raise ProjectContextError('Missing uploaded images declared by the context pack: ' + ', '.join(missing))
 
@@ -251,6 +254,7 @@ def _add_image(doc, image, caption, caption_size, counters):
     paragraph = doc.add_paragraph()
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     paragraph.paragraph_format.keep_together = True
+    paragraph.paragraph_format.keep_with_next = True
     with io.BytesIO(image['bytes']) as buffer:
         scale = min(15.4 / image['width'], 18.5 / image['height'])
         paragraph.add_run().add_picture(
@@ -258,7 +262,8 @@ def _add_image(doc, image, caption, caption_size, counters):
             width=Cm(image['width'] * scale),
             height=Cm(image['height'] * scale),
         )
-    _caption(doc, f"Figure {counters['figure']}: {caption}", caption_size)
+    caption_paragraph = _caption(doc, f"Figure {counters['figure']}: {caption}", caption_size)
+    caption_paragraph.paragraph_format.keep_with_next = False
 
 
 def _find_image(images, filename):
@@ -529,6 +534,17 @@ def _add_dbms(doc, report, images, counters):
     doc.add_page_break()
     _heading(doc, '2. E-R Diagram', 1)
     _body(doc, sections['erd_description'])
+    if any(image['section'].lower() in ERD_SECTIONS for image in images.values()):
+        _add_unmatched_images(doc, images, used, ERD_SECTIONS, caption_size, counters)
+    else:
+        # API exports rebuild the canonical report first; submitted preview bytes
+        # are never authoritative. Direct callers can omit previews altogether.
+        diagrams = report.get('erd_diagrams') or build_erd_figures(dbms)
+        for figure in diagrams:
+            _add_image(doc, {
+                'bytes': base64.b64decode(figure['data_url'].split(',', 1)[1], validate=True),
+                'width': figure['width'], 'height': figure['height'],
+            }, figure['caption'], caption_size, counters)
     _heading(doc, '2.1 Entities and Attributes', 2)
     _table(
         doc, ['Entity', 'Attribute', 'Data Type', 'Key / Constraints', 'Description'],
@@ -536,12 +552,11 @@ def _add_dbms(doc, report, images, counters):
     )
     _heading(doc, '2.2 Relationships and Cardinality', 2)
     _table(
-        doc, ['From Entity', 'To Entity', 'Cardinality', 'Description'],
-        [[item['from_entity'], item['to_entity'], item['cardinality'], item['description']]
-         for item in dbms['relationships']],
+        doc, ['ID', 'From Entity', 'To Entity', 'Cardinality', 'Description'],
+        [[f'R{index}', item['from_entity'], item['to_entity'], item['cardinality'], item['description']]
+         for index, item in enumerate(dbms['relationships'], 1)],
         'Entity Relationships', caption_size, counters,
     )
-    _add_unmatched_images(doc, images, used, {'erd', 'e-r diagram'}, caption_size, counters)
 
     doc.add_page_break()
     _heading(doc, '3. Database Schema', 1)

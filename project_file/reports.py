@@ -4,6 +4,8 @@ import copy
 import json
 import re
 
+from .diagrams import build_erd_figures, erd_prose
+
 
 SCHEMA_VERSION = 1
 SUPPORTED_SUBMODES = ('frontend', 'dbms')
@@ -502,6 +504,9 @@ def validate_project_context(raw, expected_submode=None):
     else:
         normalized['frontend'] = None
         normalized['dbms'] = _normalize_dbms(data, errors)
+        normalized['report_sections']['erd_description'] = erd_prose(
+            normalized['report_sections']['erd_description'], normalized['dbms'],
+        )
 
     project = normalized['project']
     required_text = (
@@ -566,9 +571,14 @@ def validate_project_context(raw, expected_submode=None):
             response['missing_fields'].append('dbms.database_engine')
         if len(dbms['entities']) < 2:
             response['missing_fields'].append('dbms.entities (at least 2)')
+        entity_names = {}
         for index, entity in enumerate(dbms['entities']):
             if not entity['name']:
                 response['missing_fields'].append(f'dbms.entities[{index}].name')
+            elif entity['name'].casefold() in entity_names:
+                errors.append(f"dbms.entities[{index}].name duplicates another entity: {entity['name']}.")
+            else:
+                entity_names[entity['name'].casefold()] = entity['name']
             if not entity['attributes']:
                 response['missing_fields'].append(f'dbms.entities[{index}].attributes')
             for attr_index, attribute in enumerate(entity['attributes']):
@@ -583,6 +593,12 @@ def validate_project_context(raw, expected_submode=None):
             for field in ('from_entity', 'to_entity', 'cardinality'):
                 if not relationship[field]:
                     response['missing_fields'].append(f'dbms.relationships[{index}].{field}')
+            for field in ('from_entity', 'to_entity'):
+                name = relationship[field]
+                if name and name.casefold() not in entity_names:
+                    errors.append(f'dbms.relationships[{index}].{field} refers to an unknown entity: {name}.')
+                elif name:
+                    relationship[field] = entity_names[name.casefold()]
         if len(dbms['tables']) < 2:
             response['missing_fields'].append('dbms.tables (at least 2)')
         for index, table in enumerate(dbms['tables']):
@@ -616,11 +632,6 @@ def validate_project_context(raw, expected_submode=None):
             response['warnings'].append(
                 'Only a few DBMS use cases were supplied. Confirm the required count against the CHO/rubric.'
             )
-        if not any(
-            figure['filename'] and figure['section'].lower() in ('erd', 'e-r diagram')
-            for figure in normalized['figures']
-        ):
-            response['missing_fields'].append('figures (an ERD image filename is required)')
 
     image_roles = {}
 
@@ -808,7 +819,8 @@ DBMS-SPECIFIC WORK:
 - Copy complete CREATE TABLE statements into schema_sql using the project's actual SQL dialect.
 - Define meaningful use cases from implemented queries. Every use case needs a precise problem statement, SQL, concepts covered, an honest output description, and an optional screenshot filename.
 - Never claim SQL was executed unless this session actually executed it successfully. Mark unexecuted outputs as expected.
-- Declare an ERD image with figures[].section set to "erd". Use "use_case" for any additional SQL output figure.
+- PractiGen draws the E-R diagram automatically from entities and relationships. Use each entity's exact name in from_entity and to_entity. Do not return Mermaid, PlantUML or other diagram code.
+- An existing E-R image may optionally be declared with figures[].section set to "erd" to override the automatic diagram when uploaded. Use "use_case" for additional SQL output figures.
 - Leave report_sections empty. PractiGen writes the report one section at a time after import.
 """
 
@@ -915,6 +927,8 @@ def build_generation_messages(context, missing_fields, part_index=None, previous
         'Use only supplied facts. Never invent implementation details, screenshots, execution results, '
         'references, entities, SQL, test outcomes, student details, or measurements. Preserve an honest '
         'boundary between observed and expected behaviour. '
+        'The E-R diagram is drawn separately from the supplied entities and relationships. '
+        'For erd_description write explanatory prose only, never Mermaid, PlantUML, DBML or diagram code. '
         + ('Return only the requested section as plain prose, without JSON or Markdown fences.'
            if len(missing_fields) == 1 else 'Return valid JSON only.')
     )
@@ -935,7 +949,10 @@ VALIDATED CONTEXT:
     return [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}]
 
 
-def parse_generated_sections(text, requested_fields):
+def parse_generated_sections(text, requested_fields, context=None):
+    if (requested_fields == ['erd_description'] and context and isinstance(text, str)
+            and not text.lstrip().startswith('{') and not re.match(r'\s*```json\b', text, re.I)):
+        text = erd_prose(text, context['dbms'])
     if len(requested_fields) == 1 and isinstance(text, str) and not text.lstrip().startswith(('{', '```')):
         field = requested_fields[0]
         errors = []
@@ -955,6 +972,8 @@ def parse_generated_sections(text, requested_fields):
     result = {}
     for field in requested_fields:
         value = _clean_text(sections.get(field), f'report_sections.{field}', errors, MAX_SECTION_CHARS)
+        if field == 'erd_description' and context:
+            value = erd_prose(value, context['dbms'])
         minimum_words = _minimum_section_words(field)
         if len(value) < MIN_SECTION_CHARS:
             errors.append(
@@ -975,6 +994,8 @@ def build_project_report(context, generated_sections=None, generated_fields=None
         merged[field] = supplied if _section_is_complete(field, supplied) else generated_sections.get(field, '')
         if not _section_is_complete(field, merged[field]):
             raise ProjectGenerationError(f'Report section {field} is still missing.')
+        if field == 'erd_description':
+            merged[field] = erd_prose(merged[field], context['dbms'])
 
     generated_fields = generated_fields or list(generated_sections)
     if not generated_fields:
@@ -983,7 +1004,7 @@ def build_project_report(context, generated_sections=None, generated_fields=None
         source = 'generated'
     else:
         source = 'hybrid'
-    return {
+    report = {
         'schema_version': SCHEMA_VERSION,
         'submode': context['submode'],
         'title': context['project']['title'],
@@ -995,6 +1016,9 @@ def build_project_report(context, generated_sections=None, generated_fields=None
             'generated_fields': list(generated_fields),
         },
     }
+    if context['submode'] == 'dbms':
+        report['erd_diagrams'] = build_erd_figures(context['dbms'])
+    return report
 
 
 def canonicalize_project_report(raw_report, expected_submode=None):

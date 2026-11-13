@@ -905,7 +905,7 @@ def api_project_generate():
         for field in missing:
             if field in completed:
                 generated.update(parse_project_generated_sections(
-                    json.dumps({'report_sections': {field: completed[field]}}), [field]))
+                    json.dumps({'report_sections': {field: completed[field]}}), [field], context=context))
 
         if request.path.endswith('/section'):
             field = data.get('section')
@@ -920,7 +920,7 @@ def api_project_generate():
                 if not isinstance(previous_parts, list) or len(previous_parts) != part_index:
                     raise ProjectContextError('previous_parts must contain each completed part in order.')
                 previous_parts = [parse_project_generated_sections(
-                    json.dumps({'report_sections': {field: value}}), [field])[field]
+                    json.dumps({'report_sections': {field: value}}), [field], context=context)[field]
                     for value in previous_parts]
                 if sum(map(len, previous_parts)) > 45_000:
                     raise ProjectContextError('Saved section parts are too large.')
@@ -937,7 +937,7 @@ def api_project_generate():
             text = run_completion(messages, provider, model, provider_config, keys,
                                   temperature=0.25, top_p=0.9,
                                   max_tokens=llm_max_output_tokens(provider_config))
-            generated.update(parse_project_generated_sections(text, requested))
+            generated.update(parse_project_generated_sections(text, requested, context=context))
         if request.path.endswith('/section'):
             if part_count is not None:
                 return jsonify({'section': field, 'text': generated[field],
@@ -968,6 +968,19 @@ def api_project_generate():
         elif '429' in error_msg or 'rate limit' in error_msg.lower():
             status_code = 429
         return jsonify({'error': error_msg}), status_code
+
+
+@app.route('/api/project/preview', methods=['POST'])
+def api_project_preview():
+    """Rebuild a saved report's figures without a key or an AI request."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'A JSON request object is required.'}), 400
+    try:
+        report = canonicalize_project_report(data.get('report'))
+        return jsonify({'report': report})
+    except (ProjectContextError, ProjectGenerationError) as err:
+        return jsonify({'error': str(err)}), 400
 
 
 def safe_project_filename(value, fallback):
